@@ -82,7 +82,6 @@ if ($nvccCommend) {
     Write-Host "    [실패] 시스템 환경 변수에서 CUDA(nvcc)를 찾을 수 없음. CUDA Toolkit이 설치되지 않음." -ForegroundColor Red
     exit
 }
-exit
 
 # 사전 점검 3: cuda toolkit 에서 cudnn 및 zlib 탐지
 $cudnnDll = "$cudaBinPath\cudnn64_8.dll"
