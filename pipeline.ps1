@@ -131,9 +131,11 @@ if (Test-Path $condaExePath) {
     $installArgs = @(
         "/S",
         "/InstallationType=JustMe",
+        # "/NoShortcuts=0",
         "/RegisterPython=0",
         "/D=$condaDest"
     )
+    # NoShortcuts=1로 이미 설치한 경우: ../miniconda3/Scripts/conda.exe init powershell
     # 반드시 관리자 권한으로 실행
     Start-Process -FilePath "$sourcePath\pkgs\$condaExeName" -ArgumentList $installArgs -Wait
     # 설치 검증
