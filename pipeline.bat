@@ -11,7 +11,7 @@ if not exist "!SCRIPT_PATH!" (
 
 echo [진행] !SCRIPT_PATH! 실행 중...
 powershell.exe -NoProfile -ExecutionPolicy Bypass ^
-  -Command "Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy Bypass', '-File', '!SCRIPT_PATH!', -Verb RunAs"
+  -Command "Start-Process powershell.exe -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy Bypass', '-File', '!SCRIPT_PATH!' -Verb RunAs"
 
 endlocal
 exit /b %errorlevel%

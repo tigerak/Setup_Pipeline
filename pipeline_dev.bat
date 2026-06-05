@@ -1,21 +1,21 @@
 @echo off
 setlocal enabledelayedexpansion
-:: EUC-KR (cp949) ÀÎÄÚµù
+:: EUC-KR (cp949) ï¿½ï¿½ï¿½Úµï¿½
 
-set /p setupVer="Setup Pipeline ¹öÀüÀ» ÀÔ·ÂÇÏ½Ã¿À. (¿¹: 260519): "
+set /p setupVer="Setup Pipeline ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ô·ï¿½ï¿½Ï½Ã¿ï¿½. (ï¿½ï¿½: 260519): "
 set "SCRIPT_PATH=%~dp0pipeline_dev.ps1"
 
 echo.
 echo Setup Pipeline Ver: !setupVer!
 
 if not exist "!SCRIPT_PATH!" (
-    echo [¿À·ù] ½ºÅ©¸³Æ®¸¦ Ã£À» ¼ö ¾ø½À´Ï´Ù: !SCRIPT_PATH!
+    echo [ï¿½ï¿½ï¿½ï¿½] ï¿½ï¿½Å©ï¿½ï¿½Æ®ï¿½ï¿½ Ã£ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ï´ï¿½: !SCRIPT_PATH!
     exit /b 1
 )
 
-echo [ÁøÇà] !SCRIPT_PATH! ½ÇÇà Áß...
+echo [ï¿½ï¿½ï¿½ï¿½] !SCRIPT_PATH! ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½...
 powershell.exe -NoProfile -ExecutionPolicy Bypass ^
-  -Command "Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy Bypass', '-File', '!SCRIPT_PATH!', '-ScriptVer', '!setupVer!' -Verb RunAs"
+  -Command "Start-Process powershell.exe -ArgumentList '-NoExit', '-NoProfile', '-ExecutionPolicy Bypass', '-File', '!SCRIPT_PATH!', '-ScriptVer', '!setupVer!' -Verb RunAs"
 
 endlocal
 exit /b %errorlevel%

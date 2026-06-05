@@ -18,7 +18,8 @@ $targetCudaVersion_2 = @("12.8", "12.9")
 $condaDest           = "C:\ProgramData\miniconda3"
 # TensorRT 설정
 $trtDest_1           = "D:\visionAI\TensorRT-8.5.3.1"
-$trtDest_2           = "D:\visionAI\TensorRT-10.12.0.36"
+$trtDest_2           = "D:\visionAI\TensorRT-10.9.0.34"
+# $trtDest_2           = "D:\visionAI\TensorRT-10.12.0.36"
 # Eval Tools 설정
 $evalToolsDest       = "D:\visionAI\Eval_Tools"
 # Python 가상 환경 설정
@@ -38,13 +39,15 @@ $cudnnZipFile_2 = "cudnn-windows-x86_64-9.8.0.87_cuda12-archive.zip"
 $zlibDllFile = "zlibwapi.dll"
 $condaExeName   = "Miniconda3-py310_24.9.2-0-Windows-x86_64.exe"
 $trtZipFile_1   = "TensorRT-8.5.3.1.zip"
-$trtZipFile_2   = "TensorRT-10.12.0.36.zip"
-$envZipFile     = "tabtest_new_$ScriptVer.zip"
+$trtZipFile_2   = "TensorRT-10.9.0.34.zip"
+# $trtZipFile_2   = "TensorRT-10.12.0.36.zip"
+$envZipFile_1     = "tabtest_new_cu11_$ScriptVer.zip"
+$envZipFile_2     = "tabtest_new_cu12_$ScriptVer.zip"
 $evalToolsZipFile = "Eval_Tools_$ScriptVer.zip"
 
 ### [PRE-CHECK] 종속성 검증 ###
 Write-Host "#============================================================#" -ForegroundColor Cyan
-Write-Host "# 환경 배포 자동화 과정 시작                                #" -ForegroundColor Cyan
+Write-Host "# 환경 배포 자동화 과정 시작                                 #" -ForegroundColor Cyan
 Write-Host "#============================================================#" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "사전 점검: 시스템 환경 추적 중..." -ForegroundColor Yellow
@@ -75,12 +78,16 @@ if ($nvccCommand) {
             $trtDest = $trtDest_1 
             $trtZipFile = $trtZipFile_1
             $cudnnZipFile = $cudnnZipFile_1
+            $envZipFile = $envZipFile_1
+            $cudaTrackTag = "cu11"
             $is_msg = $true
         }
         ($cudaVerNum -in $targetCudaVersion_2) { 
             $trtDest = $trtDest_2 
             $trtZipFile = $trtZipFile_2
             $cudnnZipFile = $cudnnZipFile_2
+            $envZipFile = $envZipFile_2
+            $cudaTrackTag = "cu12"
             $is_msg = $true
         }
         Default {
@@ -155,25 +162,63 @@ $allPaths = $allPaths |
     Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
     Select-Object -Unique
 
+$pathCheckIndex = 0
+Write-Host ("    [진행] TensorRT 경로 점검 (총 {0}개)" -f $allPaths.Count) -ForegroundColor Cyan
+$trtCandidates = @()
+
 foreach ($p in $allPaths) {
-    if (-not (Test-Path $p)) { continue }
+    $pathCheckIndex++
+    if (-not (Test-Path $p)) {
+        continue
+    }
 
     $root = $p
     if ($p -match "[\\/](lib|bin)$") {
         $root = Split-Path -Parent $p
     }
 
-    $nvinferPath = Join-Path $root "lib\nvinfer.dll"
-    $pluginPath  = Join-Path $root "lib\nvinfer_plugin.dll"
+    $libPath = Join-Path $root "lib"
     $trtexecPath = Join-Path $root "bin\trtexec.exe"
-    $hasNvinfer = Test-Path $nvinferPath
-    $hasPlugin = Test-Path $pluginPath
+
+    # TensorRT 8.x: nvinfer.dll / nvinfer_plugin.dll
+    # TensorRT 10.x: nvinfer_10.dll / nvinfer_plugin_10.dll
+    $nvinferDll = Get-ChildItem -Path $libPath -Filter "nvinfer*.dll" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^nvinfer(_\d+)?\.dll$' } |
+        Select-Object -First 1
+    $pluginDll = Get-ChildItem -Path $libPath -Filter "nvinfer_plugin*.dll" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^nvinfer_plugin(_\d+)?\.dll$' } |
+        Select-Object -First 1
+
+    $hasNvinfer = $null -ne $nvinferDll
+    $hasPlugin = $null -ne $pluginDll
     $hasTrtexec = Test-Path $trtexecPath
 
+    $nvinferStatus = if ($hasNvinfer) { "OK" } else { "MISS" }
+    $pluginStatus = if ($hasPlugin) { "OK" } else { "MISS" }
+    $trtexecStatus = if ($hasTrtexec) { "OK" } else { "MISS" }
+
+    # Write-Host ("    [점검 {0}/{1}] {2} | nvinfer:{3}, plugin:{4}, trtexec:{5}" -f $pathCheckIndex, $allPaths.Count, $root, $nvinferStatus, $pluginStatus, $trtexecStatus) -ForegroundColor DarkGray
+
     if ($hasNvinfer -and $hasPlugin -and $hasTrtexec) {
+        Write-Host "    [일치] TensorRT 후보 경로 확인: $root" -ForegroundColor Green
+        $trtCandidates += $root
+    }
+}
+
+if ($trtCandidates.Count -gt 0) {
+    $trtCandidates = $trtCandidates | Select-Object -Unique
+    $expectedTrtPath = $trtDest.TrimEnd('\\')
+    $matchedExpectedTrt = $trtCandidates |
+        Where-Object { $_.TrimEnd('\\') -ieq $expectedTrtPath } |
+        Select-Object -First 1
+
+    if ($matchedExpectedTrt) {
         $isTrtInstalled = $true
-        $foundTrtPath = $root
-        break
+        $foundTrtPath = $matchedExpectedTrt
+    } else {
+        $isTrtInstalled = $false
+        $foundTrtPath = $null
+        Write-Host "    [알림] 감지된 TensorRT 경로가 CUDA($cudaVerNum) 대상 경로($trtDest)와 다릅니다. 재설치를 진행합니다." -ForegroundColor Yellow
     }
 }
 
@@ -391,17 +436,46 @@ Write-Host ""
 Write-Host "4 단계: Python 가상환경($envName) 이식 중..." -ForegroundColor Yellow
 
 $fullEnvPath = "$activeCondaPath\envs\$envName"
+$envVersionFile = Join-Path $fullEnvPath ".pipeline_env_version"
+$desiredEnvStamp = "$ScriptVer|$cudaTrackTag"
+$needEnvUpdate = $true
 
 # 가상환경 설치 폴더 탐지
 if (Test-Path $fullEnvPath) {
-    Write-Host "   [알림] 기존 가상환경 폴더가 발견되었습니다. 현재 버전으로 덮어쓰기합니다." -ForegroundColor Cyan
+    Write-Host "   [알림] 기존 가상환경 폴더가 발견되었습니다. 버전 확인 중..." -ForegroundColor Cyan
+
+    if (Test-Path $envVersionFile) {
+        $installedEnvVersionRaw = Get-Content -Path $envVersionFile -ErrorAction SilentlyContinue | Select-Object -First 1
+        $installedEnvVersion = if ($null -eq $installedEnvVersionRaw) { "" } else { $installedEnvVersionRaw.ToString().Trim() }
+        if (-not [string]::IsNullOrWhiteSpace($installedEnvVersion)) {
+            Write-Host "   [정보] 현재 가상환경 저장 버전: $installedEnvVersion" -ForegroundColor DarkGray
+        }
+
+        if ($installedEnvVersion -eq $desiredEnvStamp) {
+            $needEnvUpdate = $false
+            Write-Host "   [생략] 요청 버전/쿠다($desiredEnvStamp)와 동일하여 가상환경 이식을 건너뜁니다." -ForegroundColor Cyan
+        } else {
+            Write-Host "   [갱신] 요청 버전/쿠다($desiredEnvStamp)와 달라 가상환경을 재이식합니다." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "   [알림] 저장된 버전 정보가 없어 가상환경을 갱신합니다." -ForegroundColor Yellow
+    }
 } else {
-    # 가상환경 폴더가 없다면 생성 
-    New-Item -ItemType Directory -Force -Path $fullEnvPath | Out-Null
+    Write-Host "   [신규] 가상환경 폴더를 생성합니다." -ForegroundColor Cyan
 }
 
-Expand-Archive -Path "$sourcePath\pkgs\$envZipFile" -DestinationPath $fullEnvPath -Force
-Write-Host "    [성공] Python 가상환경($envName) 이식이 완료되었습니다." -ForegroundColor Green
+if ($needEnvUpdate) {
+    if (Test-Path $fullEnvPath) {
+        Write-Host "   [진행] 기존 가상환경 폴더를 완전 삭제합니다: $fullEnvPath" -ForegroundColor Yellow
+        Remove-Item -Path $fullEnvPath -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $fullEnvPath | Out-Null
+    Expand-Archive -Path "$sourcePath\pkgs\$envZipFile" -DestinationPath $fullEnvPath -Force
+    Set-Content -Path $envVersionFile -Value $desiredEnvStamp -Encoding ASCII -Force
+    Write-Host "    [성공] Python 가상환경($envName) 이식이 완료되었습니다. (버전/쿠다: $desiredEnvStamp)" -ForegroundColor Green
+} else {
+    Write-Host "    [완료] Python 가상환경($envName)은 최신 버전으로 유지됩니다." -ForegroundColor Green
+}
 Write-Host ""
 
 if ($isTrtInstalled -and -not [string]::IsNullOrWhiteSpace($foundTrtPath)) {
@@ -412,26 +486,30 @@ if ($isTrtInstalled -and -not [string]::IsNullOrWhiteSpace($foundTrtPath)) {
 
 ### [step 5] 시스템 환경 변수(Path) 자동 등록 ###
 $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+if ($null -eq $currentPath) {
+    $currentPath = ""
+}
 $targetPaths = @(
-    "$desiredTrtPath\lib", # DLL 파일들
-    "$desiredTrtPath\bin"  # trtexe.exe 등
+    "$cudaBinPath",         # cublas/cudnn 등 CUDA 런타임 DLL
+    "$desiredTrtPath\lib", # TensorRT DLL 파일들
+    "$desiredTrtPath\bin"  # trtexec.exe 등
 )
-$needTrtPathRegistration = ($installPlanKeys -contains "TRT")
+$needPathRegistration = ($installPlanKeys -contains "TRT")
 
-if (-not $needTrtPathRegistration) {
+if (-not $needPathRegistration) {
     foreach ($path in $targetPaths) {
         if ($currentPath -notmatch [regex]::Escape($path)) {
-            $needTrtPathRegistration = $true
+            $needPathRegistration = $true
             break
         }
     }
 }
 
-if ($needTrtPathRegistration) {
-    Write-Host "5 단계: 시스템 환경 변수(Path)에 TensorRT 라이브러리 등록 중..." -ForegroundColor Yellow
+if ($needPathRegistration) {
+    Write-Host "5 단계: 시스템 환경 변수(Path)에 CUDA/TensorRT 라이브러리 등록 중..." -ForegroundColor Yellow
     $isChanged = $false # 실제로 변경사항이 있는지 확인하는 깃발
 
-    # TensorRT 라이브러리 등을 Path에 등록
+    # CUDA/TensorRT 런타임 의존성 경로를 Path에 등록
     foreach ($path in $targetPaths) {
         if (Test-Path $path) {
             # 기존 path에 해당 경로가 존재하는지 확인
@@ -456,7 +534,7 @@ if ($needTrtPathRegistration) {
         Write-Host " [알림] 업데이트 할 새로운 경로가 없습니다." -ForegroundColor Cyan
     }
 } else {
-    Write-Host "5 단계: TensorRT Path 등록 생략 (설치 대상 아님)" -ForegroundColor Cyan
+    Write-Host "5 단계: CUDA/TensorRT Path 등록 생략 (이미 최신 경로)" -ForegroundColor Cyan
 }
 Write-Host ""
 
