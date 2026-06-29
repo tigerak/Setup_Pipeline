@@ -19,11 +19,11 @@ $condaDest           = "C:\ProgramData\miniconda3"
 # TensorRT 설정
 $trtDest_1           = "D:\visionAI\TensorRT-8.5.3.1"
 $trtDest_2           = "D:\visionAI\TensorRT-10.9.0.34"
-# $trtDest_2           = "D:\visionAI\TensorRT-10.12.0.36"
+# $trtDest_3           = "D:\visionAI\TensorRT-10.12.0.36"
 # Eval Tools 설정
 $evalToolsDest       = "D:\visionAI\Eval_Tools"
 # Python 가상 환경 설정
-$envName             = "tabtest_new"
+$envName             = "visionAI"
 
 # 상태 플래그 기본값 설정 
 $isCudnnInstalled = $false
@@ -40,9 +40,9 @@ $zlibDllFile = "zlibwapi.dll"
 $condaExeName   = "Miniconda3-py310_24.9.2-0-Windows-x86_64.exe"
 $trtZipFile_1   = "TensorRT-8.5.3.1.zip"
 $trtZipFile_2   = "TensorRT-10.9.0.34.zip"
-# $trtZipFile_2   = "TensorRT-10.12.0.36.zip"
-$envZipFile_1     = "tabtest_new_cu11_$ScriptVer.zip"
-$envZipFile_2     = "tabtest_new_cu12_$ScriptVer.zip"
+# $trtZipFile_3   = "TensorRT-10.12.0.36.zip"
+$envZipFile_1     = "visionAI_cu11_$ScriptVer.zip"
+$envZipFile_2     = "visionAI_cu12_$ScriptVer.zip"
 $evalToolsZipFile = "Eval_Tools_$ScriptVer.zip"
 
 ### [PRE-CHECK] 종속성 검증 ###
@@ -193,9 +193,9 @@ foreach ($p in $allPaths) {
     $hasPlugin = $null -ne $pluginDll
     $hasTrtexec = Test-Path $trtexecPath
 
-    $nvinferStatus = if ($hasNvinfer) { "OK" } else { "MISS" }
-    $pluginStatus = if ($hasPlugin) { "OK" } else { "MISS" }
-    $trtexecStatus = if ($hasTrtexec) { "OK" } else { "MISS" }
+    # $nvinferStatus = if ($hasNvinfer) { "OK" } else { "MISS" }
+    # $pluginStatus = if ($hasPlugin) { "OK" } else { "MISS" }
+    # $trtexecStatus = if ($hasTrtexec) { "OK" } else { "MISS" }
 
     # Write-Host ("    [점검 {0}/{1}] {2} | nvinfer:{3}, plugin:{4}, trtexec:{5}" -f $pathCheckIndex, $allPaths.Count, $root, $nvinferStatus, $pluginStatus, $trtexecStatus) -ForegroundColor DarkGray
 
@@ -343,6 +343,11 @@ if (-not [string]::IsNullOrWhiteSpace($foundCondaPath) -and (Test-Path "$foundCo
 if ($installPlanKeys -contains "TRT") {
     Write-Host "2 단계: TensorRT 압축 해제 중..." -ForegroundColor Yellow
     # 압축 해제 시작
+    if (-not (Test-Path "$sourcePath\pkgs\$trtZipFile")) {
+        Write-Host "    [오류] TensorRT 패키지를 찾지 못했습니다: $sourcePath\pkgs\$trtZipFile" -ForegroundColor Red
+        $null = Read-Host "패키지를 확인하세요. Enter 키를 누르면 설치가 종료됩니다."
+        exit
+    }
     Write-Host "    [진행] $trtZipFile 압축 해제 중..." -ForegroundColor Yellow
     Expand-Archive -Path "$sourcePath\pkgs\$trtZipFile" -DestinationPath "$trtDest" -Force
 
@@ -550,18 +555,44 @@ if ($needTrtPathUpdate) {
 }
 
 ### [step 7] Eval Tools 설치 ###
-# $evalToolsVer = [regex]::Match($simulZipFile, )
 Write-Host "7 단계: Eval Tools 버전: $ScriptVer 이식 중..." -ForegroundColor Yellow
-# 압축 해제 시작
-Write-Host "    [진행] $evalToolsZipFile 압축 해제 중..." -ForegroundColor Yellow
-Expand-Archive -Path "$sourcePath\pkgs\$evalToolsZipFile" -DestinationPath "$evalToolsDest" -Force
+$evalToolsVersionFile = Join-Path $evalToolsDest ".pipeline_evaltools_version"
+$desiredEvalToolsStamp = "$ScriptVer"
+$needEvalToolsUpdate = $true
 
-# 압축 해제 후 실제 결과물이 $evalToolsDest에 잘 들어갔는지 검사
-if (Test-Path "$evalToolsDest") {
-    Write-Host "    [성공] $evalToolsDest 에 Eval Tools 설치 완료." -ForegroundColor Green
-} else {
-    # 
-    Write-Host "    [경고] 설치가 완료되지 않음" -ForegroundColor Red
+if (Test-Path $evalToolsDest) {
+    if (Test-Path $evalToolsVersionFile) {
+        $installedEvalToolsVersionRaw = Get-Content -Path $evalToolsVersionFile -ErrorAction SilentlyContinue | Select-Object -First 1
+        $installedEvalToolsVersion = if ($null -eq $installedEvalToolsVersionRaw) { "" } else { $installedEvalToolsVersionRaw.ToString().Trim() }
+        if ($installedEvalToolsVersion -eq $desiredEvalToolsStamp) {
+            $needEvalToolsUpdate = $false
+            Write-Host "    [생략] Eval Tools가 최신 버전입니다: $desiredEvalToolsStamp" -ForegroundColor Cyan
+        }
+    }
+}
+
+if ($needEvalToolsUpdate) {
+    if (-not (Test-Path "$sourcePath\pkgs\$evalToolsZipFile")) {
+        Write-Host "    [오류] Eval Tools 패키지를 찾지 못했습니다: $sourcePath\pkgs\$evalToolsZipFile" -ForegroundColor Red
+        $null = Read-Host "패키지를 확인하세요. Enter 키를 누르면 설치가 종료됩니다."
+        exit
+    }
+
+    if (Test-Path $evalToolsDest) {
+        Write-Host "    [진행] 기존 Eval Tools 폴더를 삭제합니다: $evalToolsDest" -ForegroundColor Yellow
+        Remove-Item -Path $evalToolsDest -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Force -Path $evalToolsDest | Out-Null
+    Write-Host "    [진행] $evalToolsZipFile 압축 해제 중..." -ForegroundColor Yellow
+    Expand-Archive -Path "$sourcePath\pkgs\$evalToolsZipFile" -DestinationPath "$evalToolsDest" -Force
+    Set-Content -Path $evalToolsVersionFile -Value $desiredEvalToolsStamp -Encoding ASCII -Force
+
+    if (Test-Path "$evalToolsDest") {
+        Write-Host "    [성공] $evalToolsDest 에 Eval Tools 설치 완료. (버전: $desiredEvalToolsStamp)" -ForegroundColor Green
+    } else {
+        Write-Host "    [경고] 설치가 완료되지 않음" -ForegroundColor Red
+    }
 }
 
 ### .bat 파일 만들기 <- 버전 관리 하면서 가상환경 꾸미기 (파이썬 파일만 바뀌었나? 가상환경 업데이트 해야하나? 에 따라 달라지기)

@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 :: EUC-KR (cp949) 인코딩
 
-set "SCRIPT_PATH=%~dp0pipeline.ps1"
+set "SCRIPT_PATH=%~dp0pipeline_v1.ps1"
 
 if not exist "!SCRIPT_PATH!" (
     echo [오류] 스크립트를 찾을 수 없습니다: !SCRIPT_PATH!
