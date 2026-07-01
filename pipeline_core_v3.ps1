@@ -1,5 +1,9 @@
 Set-StrictMode -Version Latest
 
+# 배포 버전은 이제 외부 배치 파일이 아니라 이 스크립트 내부에서 직접 관리한다.
+# 필요할 때만 이 값만 바꾸면 전체 설치 흐름이 동일한 버전을 사용한다.
+$script:DefaultScriptVer = "260609"
+
 $script:GuiLogForm = $null
 $script:GuiLogRichTextBox = $null
 $script:GuiContinueButton = $null
@@ -299,9 +303,292 @@ function Show-PrecheckRuntimeSummary {
     Add-GuiLog ""
 }
 
+# PATH 문자열을 안정적으로 비교하기 위한 정규화 키 생성.
+# - 따옴표/공백을 제거하고, 가능하면 Resolve-Path 결과를 사용한다.
+# - 대소문자 차이를 무시하기 위해 소문자 키를 반환한다.
+function Get-PathCompareKey {
+    param([string]$PathValue)
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return ""
+    }
+
+    $clean = ($PathValue -replace '^"|"$', '').Trim().TrimEnd('\\')
+    if ([string]::IsNullOrWhiteSpace($clean)) {
+        return ""
+    }
+
+    try {
+        if (Test-Path -LiteralPath $clean) {
+            return ((Resolve-Path -LiteralPath $clean).ProviderPath.TrimEnd('\\')).ToLowerInvariant()
+        }
+    }
+    catch {
+    }
+
+    return $clean.ToLowerInvariant()
+}
+
+# User/Machine PATH를 배열로 읽고, 중복/공백 항목을 제거한다.
+function Get-EnvironmentPathEntries {
+    param([ValidateSet("User", "Machine")][string]$Scope)
+
+    $raw = [System.Environment]::GetEnvironmentVariable("Path", $Scope)
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return @()
+    }
+
+    $seen = @{}
+    $result = @()
+
+    foreach ($entry in ($raw -split ";")) {
+        $clean = ($entry -replace '^"|"$', '').Trim().TrimEnd('\\')
+        if ([string]::IsNullOrWhiteSpace($clean)) { continue }
+
+        $key = Get-PathCompareKey -PathValue $clean
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        if ($seen.ContainsKey($key)) { continue }
+
+        $seen[$key] = $true
+        $result += $clean
+    }
+
+    return $result
+}
+
+# PATH 배열을 다시 User/Machine 환경 변수에 기록한다.
+function Set-EnvironmentPathEntries {
+    param(
+        [ValidateSet("User", "Machine")][string]$Scope,
+        [string[]]$Entries
+    )
+
+    $sanitized = @()
+    foreach ($entry in $Entries) {
+        if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+        $sanitized += ($entry -replace '^"|"$', '').Trim().TrimEnd('\\')
+    }
+
+    $newPath = ($sanitized -join ";")
+    [System.Environment]::SetEnvironmentVariable("Path", $newPath, $Scope)
+}
+
+# 후보 경로가 TensorRT 루트인지 보수적으로 판별한다.
+# lib 폴더의 nvinfer 계열 DLL + bin\trtexec.exe 존재를 기준으로 삼는다.
+function Test-TensorRTInstallRoot {
+    param([string]$RootPath)
+
+    if ([string]::IsNullOrWhiteSpace($RootPath)) {
+        return $false
+    }
+
+    if (-not (Test-Path -LiteralPath $RootPath)) {
+        return $false
+    }
+
+    $libPath = Join-Path $RootPath "lib"
+    $trtexecPath = Join-Path $RootPath "bin\trtexec.exe"
+    if ((-not (Test-Path -LiteralPath $libPath)) -or (-not (Test-Path -LiteralPath $trtexecPath))) {
+        return $false
+    }
+
+    $nvinferDll = Get-ChildItem -Path $libPath -Filter "nvinfer*.dll" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^nvinfer(_\d+)?\.dll$' } |
+        Select-Object -First 1
+    $pluginDll = Get-ChildItem -Path $libPath -Filter "nvinfer_plugin*.dll" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^nvinfer_plugin(_\d+)?\.dll$' } |
+        Select-Object -First 1
+
+    return (($null -ne $nvinferDll) -and ($null -ne $pluginDll))
+}
+
+# CUDA Toolkit의 기본 설치 루트 또는 그 하위 경로인지 판별한다.
+# TensorRT 정리 중에 CUDA 자체가 삭제되는 오탐을 막기 위한 방어 장치다.
+function Test-IsCudaToolkitPath {
+    param([string]$PathValue)
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    $cudaRootPatterns = @(
+        '^[A-Za-z]:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v\d+\.\d+',
+        '^[A-Za-z]:\\Program Files \(x86\)\\NVIDIA GPU Computing Toolkit\\CUDA\\v\d+\.\d+'
+    )
+
+    foreach ($pattern in $cudaRootPatterns) {
+        if ($PathValue -match $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# 경로가 TensorRT 전용 경로로 보이는지 더 엄격하게 검사한다.
+# - TensorRT 이름이 포함되거나
+# - TensorRT 루트로 이미 확인된 경로의 하위 경로일 때만 true를 반환한다.
+function Test-IsTensorRTLikePath {
+    param(
+        [string]$PathValue,
+        [string[]]$KnownRoots
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathValue)) {
+        return $false
+    }
+
+    $pathKey = Get-PathCompareKey -PathValue $PathValue
+    if ([string]::IsNullOrWhiteSpace($pathKey)) {
+        return $false
+    }
+
+    if (Test-IsCudaToolkitPath -PathValue $PathValue) {
+        return $false
+    }
+
+    if ($pathKey -match '\\tensorrt([\\\-]|$)') {
+        return $true
+    }
+
+    foreach ($root in $KnownRoots) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $rootKey = Get-PathCompareKey -PathValue $root
+        if ([string]::IsNullOrWhiteSpace($rootKey)) { continue }
+
+        if (($pathKey -eq $rootKey) -or
+            ($pathKey -eq "$rootKey\\lib") -or
+            ($pathKey -eq "$rootKey\\bin") -or
+            ($pathKey.StartsWith("$rootKey\\"))) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# PATH 항목이 TensorRT 관련인지 판별한다.
+# - 루트/하위(lib, bin) 직접 매칭
+# - 경로명에 TensorRT 키워드가 포함된 경우
+function Test-IsTensorRTPathEntry {
+    param(
+        [string]$PathEntry,
+        [string[]]$KnownRoots
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+        return $false
+    }
+
+    $entryKey = Get-PathCompareKey -PathValue $PathEntry
+    if ([string]::IsNullOrWhiteSpace($entryKey)) {
+        return $false
+    }
+
+    return (Test-IsTensorRTLikePath -PathValue $PathEntry -KnownRoots $KnownRoots)
+}
+
+# 기존 TensorRT와 연관된 환경 변수/경로를 모두 제거한다.
+# 요구사항에 맞게 User + Machine 범위를 모두 정리한다.
+# 이 함수는 '이름이 TensorRT 같아 보이는 변수'와 '값이 TensorRT 경로처럼 보이는 변수'만 지운다.
+# CUDA Toolkit 기본 경로는 절대 제거하지 않는다.
+function Remove-TensorRTEnvironmentSettings {
+    param([string[]]$KnownRoots)
+
+    $report = [ordered]@{
+        RemovedPathEntries = @()
+        RemovedVariables = @()
+    }
+
+    $variableNamePatterns = @(
+        '(^|_)(TRT|TENSORRT|NVINFER)(_|$)',
+        'TENSORRT',
+        'NVINFER'
+    )
+
+    foreach ($scope in @("User", "Machine")) {
+        $entries = Get-EnvironmentPathEntries -Scope $scope
+        $kept = @()
+
+        foreach ($entry in $entries) {
+            # TensorRT 전용 경로만 제거하고, CUDA Toolkit 기본 경로는 유지한다.
+            if ((Test-IsTensorRTPathEntry -PathEntry $entry -KnownRoots $KnownRoots) -and (-not (Test-IsCudaToolkitPath -PathValue $entry))) {
+                $report.RemovedPathEntries += "$scope::$entry"
+            } else {
+                $kept += $entry
+            }
+        }
+
+        Set-EnvironmentPathEntries -Scope $scope -Entries $kept
+
+        # 일반 변수는 이름과 값 둘 다 검사한다.
+        # - 이름에 TensorRT/NVINFER/TRT 계열이 들어가면 제거
+        # - 값이 TensorRT 경로처럼 보이는 경우도 제거
+        $envNames = [System.Environment]::GetEnvironmentVariables($scope).Keys | ForEach-Object { [string]$_ }
+        foreach ($varName in $envNames) {
+            $currentValue = [System.Environment]::GetEnvironmentVariable($varName, $scope)
+            if ([string]::IsNullOrWhiteSpace($currentValue)) {
+                continue
+            }
+
+            $nameMatches = $false
+            foreach ($pattern in $variableNamePatterns) {
+                if ($varName -match $pattern) {
+                    $nameMatches = $true
+                    break
+                }
+            }
+
+            $valueMatches = Test-IsTensorRTLikePath -PathValue $currentValue -KnownRoots $KnownRoots
+            if ($nameMatches -or $valueMatches) {
+                [System.Environment]::SetEnvironmentVariable($varName, $null, $scope)
+                $report.RemovedVariables += "$scope::$varName=$currentValue"
+            }
+        }
+    }
+
+    return [pscustomobject]$report
+}
+
+# 기존 TensorRT 설치 폴더를 삭제한다.
+# - 잘못된 폴더 오삭제를 피하기 위해 Test-TensorRTInstallRoot로 검증 후 제거한다.
+# - CUDA Toolkit 기본 경로는 제외한다.
+function Remove-TensorRTInstallations {
+    param([string[]]$CandidateRoots)
+
+    $report = [ordered]@{
+        RemovedRoots = @()
+        SkippedRoots = @()
+    }
+
+    $seen = @{}
+    foreach ($root in $CandidateRoots) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $key = Get-PathCompareKey -PathValue $root
+        if ([string]::IsNullOrWhiteSpace($key)) { continue }
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+
+        # CUDA Toolkit 기본 폴더는 삭제 대상에서 제외한다.
+        if (Test-IsCudaToolkitPath -PathValue $root) {
+            $report.SkippedRoots += $root
+            continue
+        }
+
+        if (Test-TensorRTInstallRoot -RootPath $root) {
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop
+            $report.RemovedRoots += $root
+        } else {
+            $report.SkippedRoots += $root
+        }
+    }
+
+    return [pscustomobject]$report
+}
+
 function Invoke-PipelineSetupV2 {
     param(
-        [Parameter(Mandatory = $true)][string]$ScriptVer,
+        [string]$ScriptVer = $script:DefaultScriptVer,
         [bool]$DebugMode = $true
     )
 
@@ -329,8 +616,12 @@ function Invoke-PipelineSetupV2 {
         }
     }
 
-    ### 환경 변수 및 설정값 정의 ###
-    # 스크립트 실행 경로가 설치 소스 기준점.
+    # ---------------------------------------------------------------------
+    # 0) 공통 설정 로드
+    # - 패키지 소스 루트, 대상 버전, 설치 목적지, zip 파일명 등
+    #   파이프라인 전체에서 사용하는 값을 한 곳에 모아둔다.
+    # - ScriptVer는 기본값을 이 파일 안에 두고, 필요하면 호출부에서만 덮어쓴다.
+    # ---------------------------------------------------------------------
     Write-Host "Received version: $ScriptVer"
 
     $sourcePath = Resolve-PackageSourcePath
@@ -350,6 +641,7 @@ function Invoke-PipelineSetupV2 {
     $isTrtInstalled = $false
     $foundCondaPath = $null
     $foundTrtPath = $null
+    $trtCandidates = @()
 
     $cudnnZipFile_1 = "cudnn-windows-x86_64-8.6.0.163_cuda11-archive.zip"
     $cudnnZipFile_2 = "cudnn-windows-x86_64-9.8.0.87_cuda12-archive.zip"
@@ -371,6 +663,11 @@ function Invoke-PipelineSetupV2 {
     }
 
     try {
+        # -----------------------------------------------------------------
+        # 1) Pre-check
+        # - GPU 드라이버 / CUDA / cuDNN / zlib / Conda / TensorRT 감지
+        # - 이후 설치 계획 수립(무엇을 설치/재설치할지)의 근거 데이터 생성
+        # -----------------------------------------------------------------
         $nvidiaSmi = Get-Command "nvidia-smi" -ErrorAction SilentlyContinue
         if ($nvidiaSmi) {
             $driverVer = (nvidia-smi --query-gpu=driver_version --format=csv,noheader) -join ", "
@@ -464,6 +761,7 @@ function Invoke-PipelineSetupV2 {
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
             Select-Object -Unique
 
+        # PATH(User+Machine)에 연결된 TensorRT 루트를 추적한다.
         $trtCandidates = @()
         foreach ($p in $allPaths) {
             if (-not (Test-Path $p)) { continue }
@@ -485,6 +783,13 @@ function Invoke-PipelineSetupV2 {
 
             if (($null -ne $nvinferDll) -and ($null -ne $pluginDll) -and (Test-Path $trtexecPath)) {
                 $trtCandidates += $root
+            }
+        }
+
+        # TensorRT 루트가 PATH에 없더라도, 파이프라인의 표준 설치 경로에 존재하면 후보로 포함한다.
+        foreach ($knownRoot in @($trtDest_1, $trtDest_2)) {
+            if (Test-TensorRTInstallRoot -RootPath $knownRoot) {
+                $trtCandidates += $knownRoot
             }
         }
 
@@ -544,7 +849,12 @@ function Invoke-PipelineSetupV2 {
         $installPlanKeys += "CONDA"
         $installPlanText += "Miniconda -> $condaDest"
     }
-    if (-not $isTrtInstalled) {
+    # TensorRT는 "이미 설치됨" 상태라도 항상 정리 후 재배포 대상으로 잡는다.
+    # 요구사항: 기존 TensorRT 관련 시스템 환경 변수까지 모두 삭제하고 우리 패키지로 재설치.
+    if ($isTrtInstalled) {
+        $installPlanKeys += "TRT"
+        $installPlanText += "TensorRT cleanup + reinstall -> $trtDest"
+    } else {
         $installPlanKeys += "TRT"
         $installPlanText += "TensorRT -> $trtDest"
     }
@@ -628,10 +938,41 @@ function Invoke-PipelineSetupV2 {
         }
         if ($installPlanKeys -contains "TRT") {
             Write-Host "[2/7] Installing TensorRT..." -ForegroundColor Yellow
+
+            # -----------------------------------------------------------------
+            # 2) 기존 TensorRT 완전 정리
+            # - 설치 폴더 제거
+            # - User/Machine PATH에서 TensorRT 항목 제거
+            # - User/Machine TensorRT 관련 환경 변수 제거
+            # - CUDA Toolkit 기본 경로는 제외
+            # - 이름/값 둘 다 TensorRT 오염 흔적을 검사
+            # -----------------------------------------------------------------
+            $cleanupRoots = @()
+            $cleanupRoots += $trtCandidates
+            $cleanupRoots += $foundTrtPath
+            $cleanupRoots += $trtDest_1
+            $cleanupRoots += $trtDest_2
+
+            $installCleanupReport = Remove-TensorRTInstallations -CandidateRoots $cleanupRoots
+            foreach ($removedRoot in $installCleanupReport.RemovedRoots) {
+                Write-Host "    [CLEAN] Removed TensorRT root: $removedRoot" -ForegroundColor DarkYellow
+            }
+
+            $envCleanupReport = Remove-TensorRTEnvironmentSettings -KnownRoots $cleanupRoots
+            foreach ($removedPathEntry in $envCleanupReport.RemovedPathEntries) {
+                Write-Host "    [CLEAN] PATH entry removed: $removedPathEntry" -ForegroundColor DarkYellow
+            }
+            foreach ($removedVar in $envCleanupReport.RemovedVariables) {
+                Write-Host "    [CLEAN] Env var removed: $removedVar" -ForegroundColor DarkYellow
+            }
+
             if (-not (Test-Path "$sourcePath\pkgs\$trtZipFile")) {
                 throw "TensorRT package not found: $sourcePath\pkgs\$trtZipFile"
             }
             if (-not $DebugMode) { Set-GuiSubProgress -Percent 40 }
+
+            # 경로가 비어 있어도 아카이브를 안정적으로 배치할 수 있도록 목적지 폴더를 생성한다.
+            New-Item -ItemType Directory -Force -Path $trtDest | Out-Null
             Expand-Archive -Path "$sourcePath\pkgs\$trtZipFile" -DestinationPath "$trtDest" -Force
             if (Test-Path "$trtDest\lib") {
                 $isTrtInstalled = $true

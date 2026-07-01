@@ -10,11 +10,18 @@ param(
     [string]$Company = "LG Ensol",
     [string]$Copyright = "Vision AI Team",
     [ValidatePattern('^\d+\.\d+(\.\d+\.\d+)?$')]
-    [string]$Version = "3.0.0.0",
+    [string]$Version = "3.1.0.0",
     [string]$IconFile = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+# -----------------------------------------------------------------------------
+# v3 EXE 빌드 스크립트
+# - 배포 런타임 진입점은 BAT가 아니라 EXE 하나로 통일한다.
+# - GUI/DEV wrapper + core script를 병합해 ps2exe로 컴파일한다.
+# - EXE 자체가 관리자 권한을 요청하므로 BAT 기반 승격 단계는 더 이상 필요 없다.
+# -----------------------------------------------------------------------------
 
 $root = $PSScriptRoot
 $outPath = Join-Path $root $OutDir
@@ -24,9 +31,9 @@ if (-not (Test-Path $outPath)) {
 }
 
 $sourceScript = if ($Target -eq "gui") {
-    Join-Path $root "pipeline_gui_v2.ps1"
+    Join-Path $root "pipeline_gui_v3.ps1"
 } else {
-    Join-Path $root "pipeline_dev_v2.ps1"
+    Join-Path $root "pipeline_dev_v3.ps1"
 }
 
 if (-not (Test-Path $sourceScript)) {
@@ -34,9 +41,9 @@ if (-not (Test-Path $sourceScript)) {
 }
 
 $exeName = if ($Target -eq "gui") {
-    "pipeline_gui_v2.exe"
+    "pipeline_gui_v3.exe"
 } else {
-    "pipeline_dev_v2.exe"
+    "pipeline_dev_v3.exe"
 }
 
 $exePath = Join-Path $outPath $exeName
@@ -51,7 +58,7 @@ Import-Module ps2exe -ErrorAction Stop
 # EXE 실행 시 $PSScriptRoot 가 임시경로로 바뀌기 때문에,
 # 코어 스크립트를 dot-source로 로드할 수 없다.
 # 빌드 전에 진입점 + 코어를 하나의 임시 파일로 병합한 뒤 컴파일한다.
-$coreScript = Join-Path $root "pipeline_core_v2.ps1"
+$coreScript = Join-Path $root "pipeline_core_v3.ps1"
 if (-not (Test-Path $coreScript)) {
     throw "Core script not found: $coreScript"
 }
@@ -60,13 +67,14 @@ $entryContent = Get-Content -Path $sourceScript -Raw
 $coreContent  = Get-Content -Path $coreScript  -Raw
 
 # param() 블록은 스크립트 최상단에만 있어야 동작한다.
+# 현재 v3 wrapper는 사실상 param이 없지만, 추후 확장을 위해 병합 로직은 유지한다.
 # 진입점의 param 블록 추출 → 코어 → 나머지 진입점 순으로 병합한다.
 $paramMatch = [regex]::Match($entryContent, '(?s)^\s*(param\s*\(.*?\))\s*')
 $paramBlock = if ($paramMatch.Success) { $paramMatch.Groups[1].Value.Trim() } else { "" }
 
 $entryStripped = $entryContent `
     -replace '(?s)^\s*param\s*\(.*?\)\s*', '' `
-    -replace '(?m)^\s*\.\s+"?\$PSScriptRoot\\pipeline_core_v2\.ps1"?\s*$', ''
+    -replace '(?m)^\s*\.\s+"?\$PSScriptRoot\\pipeline_core_v3\.ps1"?\s*$', ''
 
 if ($paramBlock) {
     $mergedContent = $paramBlock + "`r`n`r`n" + $coreContent + "`r`n" + $entryStripped
@@ -117,4 +125,4 @@ Write-Host "Build completed: $exePath" -ForegroundColor Green
 Write-Host "Run the EXE and approve UAC prompt to launch as administrator." -ForegroundColor Cyan
 Write-Host "Metadata => Company: $Company | Product: $Product | Version: $Version" -ForegroundColor Cyan
 
-# powershell -ExecutionPolicy Bypass -File .\build_exe_v2.ps1 -Target gui (or dev)
+# powershell -ExecutionPolicy Bypass -File .\build_exe_v3.ps1 -Target gui (or dev)
