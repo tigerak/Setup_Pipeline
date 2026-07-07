@@ -98,8 +98,8 @@ function Initialize-GuiLogWindow {
     $script:GuiLogForm = New-Object System.Windows.Forms.Form
     $script:GuiLogForm.Text = "Setup Pipeline Progress"
     $script:GuiLogForm.StartPosition = "CenterScreen"
-    $script:GuiLogForm.Size = New-Object System.Drawing.Size(980, 720)
-    $script:GuiLogForm.TopMost = $false
+    $script:GuiLogForm.Size = New-Object System.Drawing.Size(980, 680)
+    $script:GuiLogForm.TopMost = $true
 
     $script:GuiLogRichTextBox = New-Object System.Windows.Forms.RichTextBox
     $script:GuiLogRichTextBox.ReadOnly = $true
@@ -111,18 +111,17 @@ function Initialize-GuiLogWindow {
     # 하단 패널 (프로그래스 바 + 버튼)
     $buttonPanel = New-Object System.Windows.Forms.Panel
     $buttonPanel.Dock = "Bottom"
-    $buttonPanel.Height = 130
-    $buttonPanel.BackColor = [System.Drawing.Color]::LightGray
+    $buttonPanel.Height = 110
 
     # 1단계 진행률 레이블
     $script:GuiStepStatusLabel = New-Object System.Windows.Forms.Label
     $script:GuiStepStatusLabel.Text = "Step progress: waiting"
     $script:GuiStepStatusLabel.AutoSize = $false
     $script:GuiStepStatusLabel.Width = 520
-    $script:GuiStepStatusLabel.Height = 16
+    $script:GuiStepStatusLabel.Height = 18
     $script:GuiStepStatusLabel.Left = 10
     $script:GuiStepStatusLabel.Top = 8
-    $script:GuiStepStatusLabel.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
+    $script:GuiStepStatusLabel.Font = New-Object System.Drawing.Font("Consolas", 9)
 
     # 1단계 진행률 바
     $script:GuiStepProgressBar = New-Object System.Windows.Forms.ProgressBar
@@ -132,7 +131,7 @@ function Initialize-GuiLogWindow {
     $script:GuiStepProgressBar.Width = 520
     $script:GuiStepProgressBar.Height = 18
     $script:GuiStepProgressBar.Left = 10
-    $script:GuiStepProgressBar.Top = 26
+    $script:GuiStepProgressBar.Top = 28
 
     # 세부 진행률 레이블
     $script:GuiSubStatusLabel = New-Object System.Windows.Forms.Label
@@ -141,7 +140,7 @@ function Initialize-GuiLogWindow {
     $script:GuiSubStatusLabel.Width = 520
     $script:GuiSubStatusLabel.Height = 16
     $script:GuiSubStatusLabel.Left = 10
-    $script:GuiSubStatusLabel.Top = 50
+    $script:GuiSubStatusLabel.Top = 52
     $script:GuiSubStatusLabel.Font = New-Object System.Drawing.Font("Consolas", 9)
 
     # 세부 진행률 바
@@ -152,15 +151,52 @@ function Initialize-GuiLogWindow {
     $script:GuiSubProgressBar.Width = 520
     $script:GuiSubProgressBar.Height = 18
     $script:GuiSubProgressBar.Left = 10
-    $script:GuiSubProgressBar.Top = 68
+    $script:GuiSubProgressBar.Top = 72
+
+    function Set-GuiButtonStyle {
+        param(
+            [Parameter(Mandatory = $true)]
+            [System.Windows.Forms.Button]$Button
+        )
+
+        $Button.FlatStyle = [System.Windows.Forms.FlatStyle]::Standard
+        $Button.UseVisualStyleBackColor = $false
+        $Button.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+
+        $enabledBackColor = [System.Drawing.SystemColors]::Control
+        $enabledForeColor = [System.Drawing.SystemColors]::ControlText
+        $disabledBackColor = [System.Drawing.SystemColors]::ControlLight
+        $disabledForeColor = [System.Drawing.SystemColors]::GrayText
+
+        $Button.Add_EnabledChanged({
+            if ($this.Enabled) {
+                $this.BackColor = $enabledBackColor
+                $this.ForeColor = $enabledForeColor
+            }
+            else {
+                $this.BackColor = $disabledBackColor
+                $this.ForeColor = $disabledForeColor
+            }
+        })
+
+        if ($Button.Enabled) {
+            $Button.BackColor = $enabledBackColor
+            $Button.ForeColor = $enabledForeColor
+        }
+        else {
+            $Button.BackColor = $disabledBackColor
+            $Button.ForeColor = $disabledForeColor
+        }
+    }
 
     $script:GuiContinueButton = New-Object System.Windows.Forms.Button
     $script:GuiContinueButton.Text = "Continue"
     $script:GuiContinueButton.Width = 110
-    $script:GuiContinueButton.Height = 40
+    $script:GuiContinueButton.Height = 30
     $script:GuiContinueButton.Left = 560
-    $script:GuiContinueButton.Top = 50
+    $script:GuiContinueButton.Top = 55
     $script:GuiContinueButton.Visible = $false
+    Set-GuiButtonStyle -Button $script:GuiContinueButton
     $script:GuiContinueButton.Add_Click({
         $script:GuiDecision = $true
     })
@@ -172,6 +208,7 @@ function Initialize-GuiLogWindow {
     $script:GuiCancelButton.Left = 680
     $script:GuiCancelButton.Top = 55
     $script:GuiCancelButton.Visible = $false
+    Set-GuiButtonStyle -Button $script:GuiCancelButton
     $script:GuiCancelButton.Add_Click({
         $script:GuiDecision = $false
     })
@@ -183,6 +220,7 @@ function Initialize-GuiLogWindow {
     $script:GuiCloseButton.Left = 800
     $script:GuiCloseButton.Top = 55
     $script:GuiCloseButton.Enabled = $false
+    Set-GuiButtonStyle -Button $script:GuiCloseButton
     $script:GuiCloseButton.Add_Click({
         $script:GuiLogForm.Close()
     })
