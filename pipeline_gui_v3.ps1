@@ -6,4 +6,4 @@
 # -----------------------------------------------------------------------------
 
 . "$PSScriptRoot\pipeline_core_v3.ps1"
-Invoke-PipelineSetupV2 -DebugMode $false
+Invoke-PipelineSetupV2

@@ -1,8 +1,10 @@
 Set-StrictMode -Version Latest
 
-# 배포 버전은 이제 외부 배치 파일이 아니라 이 스크립트 내부에서 직접 관리한다.
-# 필요할 때만 이 값만 바꾸면 전체 설치 흐름이 동일한 버전을 사용한다.
-$script:DefaultScriptVer = "260609"
+# 배포 버전: Conda 환경과 Eval Tools 버전을 독립적으로 관리한다.
+# - CondaEnvVer: Python 가상 환경(visionAI) 패키지 버전
+# - EvaltoolsVer: Eval Tools 패키지 버전
+$script:DefaultCondaEnvVer = "260706"
+$script:DefaultEvaltoolsVer = "260706"
 
 $script:GuiLogForm = $null
 $script:GuiLogRichTextBox = $null
@@ -11,7 +13,10 @@ $script:GuiCancelButton = $null
 $script:GuiCloseButton = $null
 $script:GuiStepStatusLabel = $null
 $script:GuiStepProgressBar = $null
+$script:GuiSubStatusLabel = $null
+$script:GuiSubProgressBar = $null
 $script:GuiDecision = $null
+$script:CurrentStep = 0
 
 function Convert-ConsoleColorToDrawingColor {
     param([System.ConsoleColor]$Color)
@@ -93,8 +98,8 @@ function Initialize-GuiLogWindow {
     $script:GuiLogForm = New-Object System.Windows.Forms.Form
     $script:GuiLogForm.Text = "Setup Pipeline Progress"
     $script:GuiLogForm.StartPosition = "CenterScreen"
-    $script:GuiLogForm.Size = New-Object System.Drawing.Size(980, 680)
-    $script:GuiLogForm.TopMost = $true
+    $script:GuiLogForm.Size = New-Object System.Drawing.Size(980, 720)
+    $script:GuiLogForm.TopMost = $false
 
     $script:GuiLogRichTextBox = New-Object System.Windows.Forms.RichTextBox
     $script:GuiLogRichTextBox.ReadOnly = $true
@@ -103,18 +108,23 @@ function Initialize-GuiLogWindow {
     $script:GuiLogRichTextBox.BackColor = [System.Drawing.Color]::White
     $script:GuiLogRichTextBox.ForeColor = [System.Drawing.Color]::Black
 
+    # 하단 패널 (프로그래스 바 + 버튼)
     $buttonPanel = New-Object System.Windows.Forms.Panel
     $buttonPanel.Dock = "Bottom"
-    $buttonPanel.Height = 86
+    $buttonPanel.Height = 130
+    $buttonPanel.BackColor = [System.Drawing.Color]::LightGray
 
+    # 1단계 진행률 레이블
     $script:GuiStepStatusLabel = New-Object System.Windows.Forms.Label
     $script:GuiStepStatusLabel.Text = "Step progress: waiting"
     $script:GuiStepStatusLabel.AutoSize = $false
     $script:GuiStepStatusLabel.Width = 520
-    $script:GuiStepStatusLabel.Height = 18
+    $script:GuiStepStatusLabel.Height = 16
     $script:GuiStepStatusLabel.Left = 10
     $script:GuiStepStatusLabel.Top = 8
+    $script:GuiStepStatusLabel.Font = New-Object System.Drawing.Font("Consolas", 9, [System.Drawing.FontStyle]::Bold)
 
+    # 1단계 진행률 바
     $script:GuiStepProgressBar = New-Object System.Windows.Forms.ProgressBar
     $script:GuiStepProgressBar.Minimum = 0
     $script:GuiStepProgressBar.Maximum = 100
@@ -122,14 +132,34 @@ function Initialize-GuiLogWindow {
     $script:GuiStepProgressBar.Width = 520
     $script:GuiStepProgressBar.Height = 18
     $script:GuiStepProgressBar.Left = 10
-    $script:GuiStepProgressBar.Top = 28
+    $script:GuiStepProgressBar.Top = 26
+
+    # 세부 진행률 레이블
+    $script:GuiSubStatusLabel = New-Object System.Windows.Forms.Label
+    $script:GuiSubStatusLabel.Text = "Sub progress: 0%"
+    $script:GuiSubStatusLabel.AutoSize = $false
+    $script:GuiSubStatusLabel.Width = 520
+    $script:GuiSubStatusLabel.Height = 16
+    $script:GuiSubStatusLabel.Left = 10
+    $script:GuiSubStatusLabel.Top = 50
+    $script:GuiSubStatusLabel.Font = New-Object System.Drawing.Font("Consolas", 9)
+
+    # 세부 진행률 바
+    $script:GuiSubProgressBar = New-Object System.Windows.Forms.ProgressBar
+    $script:GuiSubProgressBar.Minimum = 0
+    $script:GuiSubProgressBar.Maximum = 100
+    $script:GuiSubProgressBar.Value = 0
+    $script:GuiSubProgressBar.Width = 520
+    $script:GuiSubProgressBar.Height = 18
+    $script:GuiSubProgressBar.Left = 10
+    $script:GuiSubProgressBar.Top = 68
 
     $script:GuiContinueButton = New-Object System.Windows.Forms.Button
     $script:GuiContinueButton.Text = "Continue"
     $script:GuiContinueButton.Width = 110
-    $script:GuiContinueButton.Height = 30
+    $script:GuiContinueButton.Height = 40
     $script:GuiContinueButton.Left = 560
-    $script:GuiContinueButton.Top = 20
+    $script:GuiContinueButton.Top = 50
     $script:GuiContinueButton.Visible = $false
     $script:GuiContinueButton.Add_Click({
         $script:GuiDecision = $true
@@ -140,7 +170,7 @@ function Initialize-GuiLogWindow {
     $script:GuiCancelButton.Width = 110
     $script:GuiCancelButton.Height = 30
     $script:GuiCancelButton.Left = 680
-    $script:GuiCancelButton.Top = 20
+    $script:GuiCancelButton.Top = 55
     $script:GuiCancelButton.Visible = $false
     $script:GuiCancelButton.Add_Click({
         $script:GuiDecision = $false
@@ -151,7 +181,7 @@ function Initialize-GuiLogWindow {
     $script:GuiCloseButton.Width = 110
     $script:GuiCloseButton.Height = 30
     $script:GuiCloseButton.Left = 800
-    $script:GuiCloseButton.Top = 20
+    $script:GuiCloseButton.Top = 55
     $script:GuiCloseButton.Enabled = $false
     $script:GuiCloseButton.Add_Click({
         $script:GuiLogForm.Close()
@@ -159,6 +189,8 @@ function Initialize-GuiLogWindow {
 
     $buttonPanel.Controls.Add($script:GuiStepStatusLabel)
     $buttonPanel.Controls.Add($script:GuiStepProgressBar)
+    $buttonPanel.Controls.Add($script:GuiSubStatusLabel)
+    $buttonPanel.Controls.Add($script:GuiSubProgressBar)
     $buttonPanel.Controls.Add($script:GuiContinueButton)
     $buttonPanel.Controls.Add($script:GuiCancelButton)
     $buttonPanel.Controls.Add($script:GuiCloseButton)
@@ -166,6 +198,11 @@ function Initialize-GuiLogWindow {
     $script:GuiLogForm.Controls.Add($script:GuiLogRichTextBox)
     $script:GuiLogForm.Controls.Add($buttonPanel)
     [void]$script:GuiLogForm.Show()
+    # GUI가 제대로 렌더링되도록 이벤트 처리
+    for ($i = 0; $i -lt 3; $i++) {
+        [System.Windows.Forms.Application]::DoEvents()
+        Start-Sleep -Milliseconds 50
+    }
 }
 
 function Set-GuiStepProgress {
@@ -181,12 +218,24 @@ function Set-GuiStepProgress {
     }
 
     $script:GuiStepProgressBar.Style = [System.Windows.Forms.ProgressBarStyle]::Continuous
+    $script:CurrentStep = $Step
+    
     if ($Running) {
-        $script:GuiStepProgressBar.Value = 0
+        # 전체 8단계 중 현재 Step의 시작 위치 계산
+        $stepStartPercent = [int](($Step - 1) * 100 / $TotalSteps)
+        $script:GuiStepProgressBar.Value = $stepStartPercent
         $script:GuiStepStatusLabel.Text = "Step $($Step)/$($TotalSteps): $Title..."
+        # 새 단계 시작 시 Sub Progress를 0으로 초기화
+        $script:GuiSubProgressBar.Value = 0
+        $script:GuiSubStatusLabel.Text = "Sub progress: 0%"
     } else {
-        $script:GuiStepProgressBar.Value = 100
+        # 전체 8단계 중 현재 Step의 완료 위치 계산
+        $stepEndPercent = [int]($Step * 100 / $TotalSteps)
+        $script:GuiStepProgressBar.Value = $stepEndPercent
         $script:GuiStepStatusLabel.Text = "Step $($Step)/$($TotalSteps): $Title"
+        # 단계 완료 시 Sub Progress를 100%로 설정
+        $script:GuiSubProgressBar.Value = 100
+        $script:GuiSubStatusLabel.Text = "Sub progress: 100%"
     }
     [System.Windows.Forms.Application]::DoEvents()
 }
@@ -194,8 +243,24 @@ function Set-GuiStepProgress {
 function Set-GuiSubProgress {
     param([int]$Percent)
 
-    if ($null -eq $script:GuiStepProgressBar) { return }
-    $script:GuiStepProgressBar.Value = [Math]::Max(0, [Math]::Min($Percent, 100))
+    if ($null -eq $script:GuiSubProgressBar) { return }
+    $script:GuiSubProgressBar.Value = [Math]::Max(0, [Math]::Min($Percent, 100))
+    $script:GuiSubStatusLabel.Text = "Sub progress: $($script:GuiSubProgressBar.Value)%"
+    
+    # Step Progress bar도 함께 업데이트
+    if (($null -ne $script:CurrentStep) -and ($script:CurrentStep -gt 0)) {
+        $totalSteps = 8
+        # 현재 Step의 시작과 끝 위치 계산
+        $stepStart = [int](($script:CurrentStep - 1) * 100 / $totalSteps)
+        $stepEnd = [int]($script:CurrentStep * 100 / $totalSteps)
+        $stepRange = $stepEnd - $stepStart
+        
+        # Sub Progress에 따라 Step bar 값 계산
+        $subPercent = $script:GuiSubProgressBar.Value
+        $stepValue = [int]($stepStart + ($stepRange * $subPercent / 100))
+        $script:GuiStepProgressBar.Value = $stepValue
+    }
+    
     [System.Windows.Forms.Application]::DoEvents()
 }
 
@@ -229,6 +294,8 @@ function Add-GuiLog {
 function Request-GuiContinue {
     param([string]$Prompt)
 
+    # 사용자 응답이 필요한 순간에만 최상위로 올려 놓는다.
+    Set-GuiTopMost -Enabled $true
     Add-GuiLog ""
     Add-GuiLog $Prompt
     Add-GuiLog "Use Continue or Cancel in the same window."
@@ -244,11 +311,16 @@ function Request-GuiContinue {
     $script:GuiContinueButton.Visible = $false
     $script:GuiCancelButton.Visible = $false
 
+    # 외부 설치기 창과 충돌하지 않도록 다시 비최상위로 되돌린다.
+    Set-GuiTopMost -Enabled $false
+
     return ($script:GuiDecision -eq $true)
 }
 
 function Wait-GuiLogWindowClose {
     if ($null -ne $script:GuiCloseButton -and -not $script:GuiLogForm.IsDisposed) {
+        # 종료 안내 단계는 사용자 확인이 필요하므로 최상위로 노출한다.
+        Set-GuiTopMost -Enabled $true
         $script:GuiCloseButton.Enabled = $true
         Add-GuiLog ""
         Add-GuiLog "Process finished. Click Close to exit."
@@ -258,20 +330,232 @@ function Wait-GuiLogWindowClose {
     }
 }
 
+function Set-GuiTopMost {
+    param([bool]$Enabled)
+
+    if (($null -eq $script:GuiLogForm) -or $script:GuiLogForm.IsDisposed) {
+        return
+    }
+
+    $script:GuiLogForm.TopMost = $Enabled
+    if ($Enabled) {
+        $script:GuiLogForm.Activate()
+    }
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Invoke-WithGuiNotOnTop {
+    <#
+    .SYNOPSIS
+    외부 설치 프로그램 실행 시 GUI 창을 백그라운드에 두고 TopMost = false로 설정.
+    GUI는 계속 visible 상태를 유지하므로 로그와 진행 상황을 볼 수 있다.
+    실행 중 주기적으로 DoEvents()를 호출하여 GUI 응답성을 유지한다.
+    #>
+    param([Parameter(Mandatory = $true)][scriptblock]$Action)
+
+    $wasMostOnTop = $false
+    if (($null -ne $script:GuiLogForm) -and (-not $script:GuiLogForm.IsDisposed)) {
+        $wasMostOnTop = $script:GuiLogForm.TopMost
+        if ($wasMostOnTop) {
+            $script:GuiLogForm.TopMost = $false
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+
+    try {
+        & $Action
+        # 액션 실행 후 GUI 이벤트 처리
+        for ($i = 0; $i -lt 5; $i++) {
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
+    }
+    finally {
+        if ($wasMostOnTop -and ($null -ne $script:GuiLogForm) -and (-not $script:GuiLogForm.IsDisposed)) {
+            $script:GuiLogForm.TopMost = $true
+            $script:GuiLogForm.Activate()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+}
+
+function Invoke-ProcessWithGuiProgress {
+    <#
+    .SYNOPSIS
+    외부 프로세스를 실행하는 동안 GUI 이벤트를 계속 처리하고,
+    Sub Progress를 왕복 애니메이션으로 갱신해 멈춤처럼 보이지 않게 한다.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [int]$StartPercent = 10,
+        [int]$MaxPercentWhileRunning = 95,
+        [int]$TickMilliseconds = 250
+    )
+
+    $wasMostOnTop = $false
+    if (($null -ne $script:GuiLogForm) -and (-not $script:GuiLogForm.IsDisposed)) {
+        $wasMostOnTop = $script:GuiLogForm.TopMost
+        if ($wasMostOnTop) {
+            $script:GuiLogForm.TopMost = $false
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+
+    try {
+        $start = [Math]::Max(0, [Math]::Min($StartPercent, 100))
+        $maxRun = [Math]::Max($start, [Math]::Min($MaxPercentWhileRunning, 99))
+        $tick = [Math]::Max(100, $TickMilliseconds)
+
+        Set-GuiSubProgress -Percent $start
+        $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -PassThru
+
+        $percent = $start
+        while (-not $proc.HasExited) {
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds $tick
+
+            if ($percent -lt $maxRun) {
+                $percent += 2
+                if ($percent -gt $maxRun) {
+                    $percent = $maxRun
+                }
+            }
+
+            Set-GuiSubProgress -Percent $percent
+        }
+
+        if ($proc.ExitCode -ne 0) {
+            throw "Process failed with exit code $($proc.ExitCode): $FilePath"
+        }
+
+        Set-GuiSubProgress -Percent 100
+    }
+    finally {
+        if ($wasMostOnTop -and ($null -ne $script:GuiLogForm) -and (-not $script:GuiLogForm.IsDisposed)) {
+            $script:GuiLogForm.TopMost = $true
+            $script:GuiLogForm.Activate()
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+}
+
+function Expand-ArchiveWithGuiProgress {
+    <#
+    .SYNOPSIS
+    ZIP 엔트리를 파일 단위로 풀면서 Sub Progress를 실시간으로 갱신한다.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$ZipPath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [int]$StartPercent = 0,
+        [int]$EndPercent = 100
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    if (-not (Test-Path -LiteralPath $DestinationPath)) {
+        New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+    }
+
+    $start = [Math]::Max(0, [Math]::Min($StartPercent, 100))
+    $end = [Math]::Max($start, [Math]::Min($EndPercent, 100))
+
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $entries = @($zip.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) })
+        $total = $entries.Count
+
+        if ($total -eq 0) {
+            Set-GuiSubProgress -Percent $end
+            return
+        }
+
+        $i = 0
+        foreach ($entry in $entries) {
+            $targetPath = Join-Path $DestinationPath $entry.FullName
+            $targetDir = Split-Path -Parent $targetPath
+            if (-not [string]::IsNullOrWhiteSpace($targetDir) -and -not (Test-Path -LiteralPath $targetDir)) {
+                New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+            }
+
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $targetPath, $true)
+
+            $i++
+            $ratio = [double]$i / [double]$total
+            $percent = [int][Math]::Round($start + (($end - $start) * $ratio))
+            Set-GuiSubProgress -Percent $percent
+        }
+    }
+    finally {
+        if ($null -ne $zip) {
+            $zip.Dispose()
+        }
+    }
+}
+
+function Copy-DirectoryFilesWithGuiProgress {
+    <#
+    .SYNOPSIS
+    디렉터리 파일을 재귀 복사하면서 Sub Progress를 실시간으로 갱신한다.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDir,
+        [Parameter(Mandatory = $true)][string]$DestinationDir,
+        [int]$StartPercent = 0,
+        [int]$EndPercent = 100
+    )
+
+    if (-not (Test-Path -LiteralPath $SourceDir)) {
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $DestinationDir)) {
+        New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+    }
+
+    $start = [Math]::Max(0, [Math]::Min($StartPercent, 100))
+    $end = [Math]::Max($start, [Math]::Min($EndPercent, 100))
+
+    $files = @(Get-ChildItem -Path $SourceDir -File -Recurse -ErrorAction SilentlyContinue)
+    $total = $files.Count
+    if ($total -eq 0) {
+        Set-GuiSubProgress -Percent $end
+        return
+    }
+
+    $baseLen = $SourceDir.TrimEnd('\\').Length
+    $i = 0
+    foreach ($file in $files) {
+        $relative = $file.FullName.Substring($baseLen).TrimStart('\\')
+        $target = Join-Path $DestinationDir $relative
+        $targetDir = Split-Path -Parent $target
+
+        if (-not (Test-Path -LiteralPath $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+
+        Copy-Item -LiteralPath $file.FullName -Destination $target -Force
+
+        $i++
+        $ratio = [double]$i / [double]$total
+        $percent = [int][Math]::Round($start + (($end - $start) * $ratio))
+        Set-GuiSubProgress -Percent $percent
+    }
+}
+
 function Show-StageError {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
-        [Parameter(Mandatory = $true)]$ErrorRecord,
-        [bool]$DebugMode = $true
+        [Parameter(Mandatory = $true)]$ErrorRecord
     )
 
     $msg = "[$Stage] Failed: $($ErrorRecord.Exception.Message)"
-    Write-Host $msg -ForegroundColor Red
-
-    if (-not $DebugMode) {
-        Add-GuiLog $msg
-        Wait-GuiLogWindowClose
-    }
+    Add-GuiLog $msg -ForegroundColor Red
+    Set-GuiTopMost -Enabled $true
+    [void][System.Windows.Forms.MessageBox]::Show($msg, "Setup Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+    Wait-GuiLogWindowClose
 }
 
 function Show-PrecheckRuntimeSummary {
@@ -490,7 +774,9 @@ function Test-IsTensorRTPathEntry {
 
 # 기존 TensorRT와 연관된 환경 변수/경로를 모두 제거한다.
 # 요구사항에 맞게 User + Machine 범위를 모두 정리한다.
-# 이 함수는 '이름이 TensorRT 같아 보이는 변수'와 '값이 TensorRT 경로처럼 보이는 변수'만 지운다.
+# 파일 삭제와 동일한 보수적 기준을 적용:
+# - PATH 항목: Test-TensorRTInstallRoot로 검증된 루트의 lib/bin만 제거
+# - 환경변수 값: Test-TensorRTInstallRoot로 검증된 경로인 경우만 제거
 # CUDA Toolkit 기본 경로는 절대 제거하지 않는다.
 function Remove-TensorRTEnvironmentSettings {
     param([string[]]$KnownRoots)
@@ -500,19 +786,45 @@ function Remove-TensorRTEnvironmentSettings {
         RemovedVariables = @()
     }
 
-    $variableNamePatterns = @(
-        '(^|_)(TRT|TENSORRT|NVINFER)(_|$)',
-        'TENSORRT',
-        'NVINFER'
-    )
+    # 검증된 TensorRT 루트 경로 목록 생성 (파일 삭제와 동일한 기준)
+    $verifiedTrtRoots = @()
+    $seen = @{}
+    foreach ($root in $KnownRoots) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        if (Test-IsCudaToolkitPath -PathValue $root) { continue }
+        
+        $key = Get-PathCompareKey -PathValue $root
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+
+        if (Test-TensorRTInstallRoot -RootPath $root) {
+            $verifiedTrtRoots += $root
+        }
+    }
 
     foreach ($scope in @("User", "Machine")) {
         $entries = Get-EnvironmentPathEntries -Scope $scope
         $kept = @()
 
         foreach ($entry in $entries) {
-            # TensorRT 전용 경로만 제거하고, CUDA Toolkit 기본 경로는 유지한다.
-            if ((Test-IsTensorRTPathEntry -PathEntry $entry -KnownRoots $KnownRoots) -and (-not (Test-IsCudaToolkitPath -PathValue $entry))) {
+            $shouldRemove = $false
+            
+            # PATH 항목이 검증된 TensorRT 루트의 lib 또는 bin 하위 경로인지 확인
+            foreach ($verifiedRoot in $verifiedTrtRoots) {
+                $libPath = Join-Path $verifiedRoot "lib"
+                $binPath = Join-Path $verifiedRoot "bin"
+                
+                $entryKey = Get-PathCompareKey -PathValue $entry
+                $libKey = Get-PathCompareKey -PathValue $libPath
+                $binKey = Get-PathCompareKey -PathValue $binPath
+                
+                if (($entryKey -eq $libKey) -or ($entryKey -eq $binKey)) {
+                    $shouldRemove = $true
+                    break
+                }
+            }
+
+            if ($shouldRemove) {
                 $report.RemovedPathEntries += "$scope::$entry"
             } else {
                 $kept += $entry
@@ -521,9 +833,7 @@ function Remove-TensorRTEnvironmentSettings {
 
         Set-EnvironmentPathEntries -Scope $scope -Entries $kept
 
-        # 일반 변수는 이름과 값 둘 다 검사한다.
-        # - 이름에 TensorRT/NVINFER/TRT 계열이 들어가면 제거
-        # - 값이 TensorRT 경로처럼 보이는 경우도 제거
+        # 환경변수 값이 검증된 TensorRT 루트인 경우만 제거
         $envNames = [System.Environment]::GetEnvironmentVariables($scope).Keys | ForEach-Object { [string]$_ }
         foreach ($varName in $envNames) {
             $currentValue = [System.Environment]::GetEnvironmentVariable($varName, $scope)
@@ -531,16 +841,18 @@ function Remove-TensorRTEnvironmentSettings {
                 continue
             }
 
-            $nameMatches = $false
-            foreach ($pattern in $variableNamePatterns) {
-                if ($varName -match $pattern) {
-                    $nameMatches = $true
+            # 변수 값이 검증된 TensorRT 루트 경로와 일치하는지 확인
+            $valueKey = Get-PathCompareKey -PathValue $currentValue
+            $shouldRemove = $false
+            foreach ($verifiedRoot in $verifiedTrtRoots) {
+                $rootKey = Get-PathCompareKey -PathValue $verifiedRoot
+                if ($valueKey -eq $rootKey) {
+                    $shouldRemove = $true
                     break
                 }
             }
 
-            $valueMatches = Test-IsTensorRTLikePath -PathValue $currentValue -KnownRoots $KnownRoots
-            if ($nameMatches -or $valueMatches) {
+            if ($shouldRemove) {
                 [System.Environment]::SetEnvironmentVariable($varName, $null, $scope)
                 $report.RemovedVariables += "$scope::$varName=$currentValue"
             }
@@ -588,44 +900,17 @@ function Remove-TensorRTInstallations {
 
 function Invoke-PipelineSetupV2 {
     param(
-        [string]$ScriptVer = $script:DefaultScriptVer,
-        [bool]$DebugMode = $true
+        [string]$CondaEnvVer = $script:DefaultCondaEnvVer,
+        [string]$EvaltoolsVer = $script:DefaultEvaltoolsVer
     )
 
-    if (-not $DebugMode) {
-        Initialize-GuiLogWindow
-        Set-GuiStepProgress -Step 0 -Title "Initializing"
+    Initialize-GuiLogWindow
+    Set-GuiStepProgress -Step 0 -Title "Initializing"
 
-        function global:Write-Host {
-            [CmdletBinding()]
-            param(
-                [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
-                [object[]]$Object,
-                [System.ConsoleColor]$ForegroundColor = [System.ConsoleColor]::Gray,
-                [System.ConsoleColor]$BackgroundColor,
-                [switch]$NoNewline,
-                [object]$Separator = " "
-            )
-
-            if ($null -eq $Object) {
-                Add-GuiLog ""
-            } else {
-                $joined = ($Object | ForEach-Object { "$_" }) -join ([string]$Separator)
-                Add-GuiLog -Message $joined -ForegroundColor $ForegroundColor -NoNewline:$NoNewline
-            }
-        }
-    }
-
-    # ---------------------------------------------------------------------
-    # 0) 공통 설정 로드
-    # - 패키지 소스 루트, 대상 버전, 설치 목적지, zip 파일명 등
-    #   파이프라인 전체에서 사용하는 값을 한 곳에 모아둔다.
-    # - ScriptVer는 기본값을 이 파일 안에 두고, 필요하면 호출부에서만 덮어쓴다.
-    # ---------------------------------------------------------------------
-    Write-Host "Received version: $ScriptVer"
+    Add-GuiLog "Version - CondaEnv: $CondaEnvVer / EvalTools: $EvaltoolsVer"
 
     $sourcePath = Resolve-PackageSourcePath
-    Write-Host "Package source root: $sourcePath" -ForegroundColor DarkGray
+    Add-GuiLog "Package source root: $sourcePath" -ForegroundColor DarkGray
     $targetCudaVersion_1 = "11.8"
     $targetCudaVersion_2 = @("12.8", "12.9")
 
@@ -649,33 +934,26 @@ function Invoke-PipelineSetupV2 {
     $condaExeName = "Miniconda3-py310_24.9.2-0-Windows-x86_64.exe"
     $trtZipFile_1 = "TensorRT-8.5.3.1.zip"
     $trtZipFile_2 = "TensorRT-10.9.0.34.zip"
-    $envZipFile_1 = "visionAI_cu11_$ScriptVer.zip"
-    $envZipFile_2 = "visionAI_cu12_$ScriptVer.zip"
-    $evalToolsZipFile = "Eval_Tools_$ScriptVer.zip"
+    $envZipFile_1 = "visionAI_cu11_$CondaEnvVer.zip"
+    $envZipFile_2 = "visionAI_cu12_$CondaEnvVer.zip"
+    $evalToolsZipFile = "Eval_Tools_$EvaltoolsVer.zip"
 
-    Write-Host "#============================================================#" -ForegroundColor Cyan
-    Write-Host "# Pipeline setup automation started                          #" -ForegroundColor Cyan
-    Write-Host "#============================================================#" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Pre-check: scanning current system status..." -ForegroundColor Yellow
-    if (-not $DebugMode) {
-        Set-GuiStepProgress -Step 1 -Title "Pre-check" -Running
-    }
+    Add-GuiLog "#============================================================#" -ForegroundColor Cyan
+    Add-GuiLog "# Pipeline setup automation started                          #" -ForegroundColor Cyan
+    Add-GuiLog "#============================================================#" -ForegroundColor Cyan
+    Add-GuiLog ""
+    Add-GuiLog "Pre-check: scanning current system status..." -ForegroundColor Yellow
+    Set-GuiStepProgress -Step 1 -Title "Pre-check" -Running
 
     try {
-        # -----------------------------------------------------------------
-        # 1) Pre-check
-        # - GPU 드라이버 / CUDA / cuDNN / zlib / Conda / TensorRT 감지
-        # - 이후 설치 계획 수립(무엇을 설치/재설치할지)의 근거 데이터 생성
-        # -----------------------------------------------------------------
         $nvidiaSmi = Get-Command "nvidia-smi" -ErrorAction SilentlyContinue
         if ($nvidiaSmi) {
             $driverVer = (nvidia-smi --query-gpu=driver_version --format=csv,noheader) -join ", "
-            Write-Host "    [OK] NVIDIA driver detected: $driverVer"
+            Add-GuiLog "    [OK] NVIDIA driver detected: $driverVer"
         } else {
             throw "NVIDIA driver check failed (nvidia-smi not found)."
         }
-        if (-not $DebugMode) { Set-GuiSubProgress -Percent 15 }
+        Set-GuiSubProgress -Percent 15
 
         $nvccCommand = Get-Command "nvcc" -ErrorAction SilentlyContinue
         if (-not $nvccCommand) {
@@ -685,7 +963,7 @@ function Invoke-PipelineSetupV2 {
         $nvccPath = $nvccCommand.Source
         $cudaVerString = (& $nvccPath --version | Select-String "release").ToString()
         $cudaVerNum = [regex]::Match($cudaVerString, "release (\d+\.\d+)").Groups[1].Value
-        if (-not $DebugMode) { Set-GuiSubProgress -Percent 30 }
+        Set-GuiSubProgress -Percent 30
 
         switch ($true) {
             ($cudaVerNum -eq $targetCudaVersion_1) {
@@ -706,7 +984,7 @@ function Invoke-PipelineSetupV2 {
                 throw "Unsupported CUDA version: $cudaVerNum (required: $targetCudaVersion_1 or $($targetCudaVersion_2 -join ', '))."
             }
         }
-        Write-Host "    [OK] CUDA toolkit detected: $cudaVerNum"
+        Add-GuiLog "    [OK] CUDA toolkit detected: $cudaVerNum"
 
         $cudaBinPath = Split-Path -Parent $nvccPath
 
@@ -715,19 +993,19 @@ function Invoke-PipelineSetupV2 {
 
         if ($cudnnDllCandidates -and $cudnnDllCandidates.Count -gt 0) {
             $isCudnnInstalled = $true
-            Write-Host "    [OK] cuDNN DLLs detected."
+            Add-GuiLog "    [OK] cuDNN DLLs detected."
         } else {
-            Write-Host "    [MISS] cuDNN DLLs not found in $cudaBinPath" -ForegroundColor Yellow
+            Add-GuiLog "    [MISS] cuDNN DLLs not found in $cudaBinPath" -ForegroundColor Yellow
         }
-        if (-not $DebugMode) { Set-GuiSubProgress -Percent 50 }
+        Set-GuiSubProgress -Percent 50
 
         if (Test-Path $zlibDll) {
             $isZlibInstalled = $true
-            Write-Host "    [OK] zlibwapi.dll detected."
+            Add-GuiLog "    [OK] zlibwapi.dll detected."
         } else {
-            Write-Host "    [MISS] zlibwapi.dll not found in $cudaBinPath" -ForegroundColor Yellow
+            Add-GuiLog "    [MISS] zlibwapi.dll not found in $cudaBinPath" -ForegroundColor Yellow
         }
-        if (-not $DebugMode) { Set-GuiSubProgress -Percent 65 }
+        Set-GuiSubProgress -Percent 65
 
         $commonCondaPaths = @(
             "C:\miniconda3",
@@ -747,11 +1025,11 @@ function Invoke-PipelineSetupV2 {
         }
 
         if ($isCondaInstalled) {
-            Write-Host "    [OK] Conda detected: $foundCondaPath" -ForegroundColor Green
+            Add-GuiLog "    [OK] Conda detected: $foundCondaPath" -ForegroundColor Green
         } else {
-            Write-Host "    [MISS] Conda not detected. Will install Miniconda." -ForegroundColor Yellow
+            Add-GuiLog "    [MISS] Conda not detected. Will install Miniconda." -ForegroundColor Yellow
         }
-        if (-not $DebugMode) { Set-GuiSubProgress -Percent 80 }
+        Set-GuiSubProgress -Percent 80
 
         $allPaths = @()
         $allPaths += ([System.Environment]::GetEnvironmentVariable("Path", "Machine") -split ";")
@@ -804,35 +1082,28 @@ function Invoke-PipelineSetupV2 {
                 $isTrtInstalled = $true
                 $foundTrtPath = $matchedExpectedTrt
             } else {
-                Write-Host "    [MISS] TensorRT found, but not matching CUDA target path ($trtDest). Reinstall required." -ForegroundColor Yellow
+                Add-GuiLog "    [MISS] TensorRT found, but not matching CUDA target path ($trtDest). Reinstall required." -ForegroundColor Yellow
             }
         }
 
         if ($isTrtInstalled) {
-            Write-Host "    [OK] TensorRT detected: $foundTrtPath" -ForegroundColor Green
+            Add-GuiLog "    [OK] TensorRT detected: $foundTrtPath" -ForegroundColor Green
         } else {
-            Write-Host "    [MISS] TensorRT not detected in expected path. Install will proceed." -ForegroundColor Yellow
+            Add-GuiLog "    [MISS] TensorRT not detected in expected path. Install will proceed." -ForegroundColor Yellow
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 1 -Title "Pre-check"
-        }
+        Set-GuiStepProgress -Step 1 -Title "Pre-check"
     }
     catch {
-        Show-StageError -Stage "Pre-check" -ErrorRecord $_ -DebugMode $DebugMode
-        if ($DebugMode) {
-            $null = Read-Host "Press Enter to exit"
-        }
+        Show-StageError -Stage "Pre-check" -ErrorRecord $_
         return
     }
 
-    if (-not $DebugMode) {
-        Show-PrecheckRuntimeSummary `
-            -IsCondaInstalled $isCondaInstalled `
-            -FoundCondaPath $foundCondaPath `
-            -IsTrtInstalled $isTrtInstalled `
-            -FoundTrtPath $foundTrtPath `
-            -ExpectedTrtPath $trtDest
-    }
+    Show-PrecheckRuntimeSummary `
+        -IsCondaInstalled $isCondaInstalled `
+        -FoundCondaPath $foundCondaPath `
+        -IsTrtInstalled $isTrtInstalled `
+        -FoundTrtPath $foundTrtPath `
+        -ExpectedTrtPath $trtDest
 
     $installPlanKeys = @()
     $installPlanText = @()
@@ -859,46 +1130,25 @@ function Invoke-PipelineSetupV2 {
         $installPlanText += "TensorRT -> $trtDest"
     }
 
-    if ($DebugMode) {
-        Write-Host "------------------------------------------------------------" -ForegroundColor Cyan
-        Write-Host " Install plan"
-        if ($installPlanText.Count -eq 0) {
-            Write-Host " - No extra install target from pre-check" -ForegroundColor Green
-            Write-Host " - Python env deployment will still run" -ForegroundColor Yellow
-        } else {
-            for ($i = 0; $i -lt $installPlanText.Count; $i++) {
-                Write-Host (" {0}. {1}" -f ($i + 1), $installPlanText[$i])
-            }
-        }
-        Write-Host "------------------------------------------------------------" -ForegroundColor Cyan
-
-        $ans = Read-Host "Continue setup? (y/N)"
-        if ($ans -notmatch "^[Yy]$") {
-            Write-Host "Canceled by user." -ForegroundColor Red
-            return
-        }
+    # GUI 전용 실행: 계획 안내 후 사용자 확인을 받는다.
+    if ($installPlanText.Count -eq 0) {
+        Add-GuiLog "No additional system component install is required from pre-check."
+        Add-GuiLog "Python environment deployment will continue."
     } else {
-        if ($installPlanText.Count -eq 0) {
-            Add-GuiLog "No additional system component install is required from pre-check."
-            Add-GuiLog "Python environment deployment will continue."
-        } else {
-            $msgBody = ($installPlanText | ForEach-Object { " - $_" }) -join "`n"
-            Add-GuiLog "Install targets:"
-            foreach ($line in ($msgBody -split "`n")) { Add-GuiLog $line }
+        $msgBody = ($installPlanText | ForEach-Object { " - $_" }) -join "`n"
+        Add-GuiLog "Install targets:"
+        foreach ($line in ($msgBody -split "`n")) { Add-GuiLog $line }
 
-            if (-not (Request-GuiContinue -Prompt "Continue setup?")) {
-                Write-Host "Canceled by user." -ForegroundColor Red
-                return
-            }
+        if (-not (Request-GuiContinue -Prompt "Continue setup?")) {
+            Add-GuiLog "Canceled by user." -ForegroundColor Red
+            return
         }
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 2 -Title "Miniconda" -Running
-        }
+        Set-GuiStepProgress -Step 2 -Title "Miniconda" -Running
         if ($installPlanKeys -contains "CONDA") {
-            Write-Host "[1/7] Installing Miniconda... (about 5 min)" -ForegroundColor Yellow
+            Add-GuiLog "[1/7] Installing Miniconda..." -ForegroundColor Yellow
             $installArgs = @(
                 "/S",
                 "/InstallationType=AllUsers",
@@ -906,23 +1156,26 @@ function Invoke-PipelineSetupV2 {
                 "/RegisterPython=0",
                 "/D=$condaDest"
             )
-            if (-not $DebugMode) { Set-GuiSubProgress -Percent 50 }
-            Start-Process -FilePath "$sourcePath\pkgs\$condaExeName" -ArgumentList $installArgs -Wait
+            # Miniconda 설치: 실행 중에도 Sub Progress가 멈추지 않도록 폴링 갱신한다.
+            Invoke-ProcessWithGuiProgress `
+                -FilePath "$sourcePath\pkgs\$condaExeName" `
+                -ArgumentList $installArgs `
+                -StartPercent 0 `
+                -MaxPercentWhileRunning 95 `
+                -TickMilliseconds 250
             if (Test-Path "$condaDest\Scripts") {
                 $foundCondaPath = $condaDest
-                Write-Host "    [OK] Miniconda installed: $condaDest" -ForegroundColor Green
+                Add-GuiLog "    [OK] Miniconda installed: $condaDest" -ForegroundColor Green
             } else {
                 throw "Miniconda install failed."
             }
         } else {
-            Write-Host "[1/7] Miniconda install skipped." -ForegroundColor Cyan
+            Add-GuiLog "[1/7] Miniconda install skipped." -ForegroundColor Cyan
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 2 -Title "Miniconda"
-        }
+        Set-GuiStepProgress -Step 2 -Title "Miniconda"
     }
     catch {
-        Show-StageError -Stage "Step 1 - Miniconda" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 1 - Miniconda" -ErrorRecord $_
         return
     }
 
@@ -933,20 +1186,10 @@ function Invoke-PipelineSetupV2 {
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 3 -Title "TensorRT" -Running
-        }
+        Set-GuiStepProgress -Step 3 -Title "TensorRT" -Running
         if ($installPlanKeys -contains "TRT") {
-            Write-Host "[2/7] Installing TensorRT..." -ForegroundColor Yellow
+            Add-GuiLog "[2/7] Installing TensorRT..." -ForegroundColor Yellow
 
-            # -----------------------------------------------------------------
-            # 2) 기존 TensorRT 완전 정리
-            # - 설치 폴더 제거
-            # - User/Machine PATH에서 TensorRT 항목 제거
-            # - User/Machine TensorRT 관련 환경 변수 제거
-            # - CUDA Toolkit 기본 경로는 제외
-            # - 이름/값 둘 다 TensorRT 오염 흔적을 검사
-            # -----------------------------------------------------------------
             $cleanupRoots = @()
             $cleanupRoots += $trtCandidates
             $cleanupRoots += $foundTrtPath
@@ -955,50 +1198,44 @@ function Invoke-PipelineSetupV2 {
 
             $installCleanupReport = Remove-TensorRTInstallations -CandidateRoots $cleanupRoots
             foreach ($removedRoot in $installCleanupReport.RemovedRoots) {
-                Write-Host "    [CLEAN] Removed TensorRT root: $removedRoot" -ForegroundColor DarkYellow
+                Add-GuiLog "    [CLEAN] Removed TensorRT root: $removedRoot" -ForegroundColor DarkYellow
             }
 
             $envCleanupReport = Remove-TensorRTEnvironmentSettings -KnownRoots $cleanupRoots
             foreach ($removedPathEntry in $envCleanupReport.RemovedPathEntries) {
-                Write-Host "    [CLEAN] PATH entry removed: $removedPathEntry" -ForegroundColor DarkYellow
+                Add-GuiLog "    [CLEAN] PATH entry removed: $removedPathEntry" -ForegroundColor DarkYellow
             }
             foreach ($removedVar in $envCleanupReport.RemovedVariables) {
-                Write-Host "    [CLEAN] Env var removed: $removedVar" -ForegroundColor DarkYellow
+                Add-GuiLog "    [CLEAN] Env var removed: $removedVar" -ForegroundColor DarkYellow
             }
 
             if (-not (Test-Path "$sourcePath\pkgs\$trtZipFile")) {
                 throw "TensorRT package not found: $sourcePath\pkgs\$trtZipFile"
             }
-            if (-not $DebugMode) { Set-GuiSubProgress -Percent 40 }
-
-            # 경로가 비어 있어도 아카이브를 안정적으로 배치할 수 있도록 목적지 폴더를 생성한다.
+            Set-GuiSubProgress -Percent 0
             New-Item -ItemType Directory -Force -Path $trtDest | Out-Null
-            Expand-Archive -Path "$sourcePath\pkgs\$trtZipFile" -DestinationPath "$trtDest" -Force
+            Expand-ArchiveWithGuiProgress -ZipPath "$sourcePath\pkgs\$trtZipFile" -DestinationPath "$trtDest" -StartPercent 0 -EndPercent 95
             if (Test-Path "$trtDest\lib") {
                 $isTrtInstalled = $true
                 $foundTrtPath = $trtDest
-                Write-Host "    [OK] TensorRT deployed: $trtDest" -ForegroundColor Green
+                Add-GuiLog "    [OK] TensorRT deployed: $trtDest" -ForegroundColor Green
             } else {
                 throw "TensorRT deploy failed (lib folder missing)."
             }
         } else {
-            Write-Host "[2/7] TensorRT install skipped." -ForegroundColor Cyan
+            Add-GuiLog "[2/7] TensorRT install skipped." -ForegroundColor Cyan
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 3 -Title "TensorRT"
-        }
+        Set-GuiStepProgress -Step 3 -Title "TensorRT"
     }
     catch {
-        Show-StageError -Stage "Step 2 - TensorRT" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 2 - TensorRT" -ErrorRecord $_
         return
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 4 -Title "cuDNN/zlib" -Running
-        }
+        Set-GuiStepProgress -Step 4 -Title "cuDNN/zlib" -Running
         if (($installPlanKeys -contains "CUDNN") -or ($installPlanKeys -contains "ZLIB")) {
-            Write-Host "[3/7] Deploying CUDA runtime dependencies..." -ForegroundColor Yellow
+            Add-GuiLog "[3/7] Deploying CUDA runtime dependencies..." -ForegroundColor Yellow
             $cudaRootPath = Split-Path -Parent $cudaBinPath
 
             if ($installPlanKeys -contains "CUDNN") {
@@ -1008,8 +1245,8 @@ function Invoke-PipelineSetupV2 {
                 }
 
                 $cudnnTempDir = Join-Path $env:TEMP ("cudnn_extract_" + [guid]::NewGuid().ToString("N"))
-                if (-not $DebugMode) { Set-GuiSubProgress -Percent 30 }
-                Expand-Archive -Path $cudnnZipPath -DestinationPath $cudnnTempDir -Force
+                Set-GuiSubProgress -Percent 0
+                Expand-ArchiveWithGuiProgress -ZipPath $cudnnZipPath -DestinationPath $cudnnTempDir -StartPercent 0 -EndPercent 45
 
                 $cudnnRoot = Get-ChildItem -Path $cudnnTempDir -Directory -Recurse -ErrorAction SilentlyContinue |
                     Where-Object { (Test-Path (Join-Path $_.FullName "bin")) -and (Test-Path (Join-Path $_.FullName "include")) -and (Test-Path (Join-Path $_.FullName "lib")) } |
@@ -1020,12 +1257,12 @@ function Invoke-PipelineSetupV2 {
                     throw "cuDNN root (bin/include/lib) not found inside archive."
                 }
 
-                if (-not $DebugMode) { Set-GuiSubProgress -Percent 70 }
-                Copy-Item -Path (Join-Path $cudnnRoot.FullName "bin\*") -Destination $cudaBinPath -Recurse -Force
-                Copy-Item -Path (Join-Path $cudnnRoot.FullName "include\*") -Destination (Join-Path $cudaRootPath "include") -Recurse -Force
-                Copy-Item -Path (Join-Path $cudnnRoot.FullName "lib\*") -Destination (Join-Path $cudaRootPath "lib") -Recurse -Force
+                # 압축 해제/복사가 길어질 수 있어 파일 단위로 진행률을 갱신한다.
+                Copy-DirectoryFilesWithGuiProgress -SourceDir (Join-Path $cudnnRoot.FullName "bin") -DestinationDir $cudaBinPath -StartPercent 45 -EndPercent 70
+                Copy-DirectoryFilesWithGuiProgress -SourceDir (Join-Path $cudnnRoot.FullName "include") -DestinationDir (Join-Path $cudaRootPath "include") -StartPercent 70 -EndPercent 88
+                Copy-DirectoryFilesWithGuiProgress -SourceDir (Join-Path $cudnnRoot.FullName "lib") -DestinationDir (Join-Path $cudaRootPath "lib") -StartPercent 88 -EndPercent 98
                 Remove-Item -Path $cudnnTempDir -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Host "    [OK] cuDNN deployed to CUDA folders." -ForegroundColor Green
+                Add-GuiLog "    [OK] cuDNN deployed to CUDA folders." -ForegroundColor Green
             }
 
             if ($installPlanKeys -contains "ZLIB") {
@@ -1035,28 +1272,25 @@ function Invoke-PipelineSetupV2 {
                     throw "zlib package not found: $zlibSourcePath"
                 }
                 Copy-Item -Path $zlibSourcePath -Destination $zlibTargetPath -Force
-                Write-Host "    [OK] zlibwapi.dll deployed." -ForegroundColor Green
+                Set-GuiSubProgress -Percent 100
+                Add-GuiLog "    [OK] zlibwapi.dll deployed." -ForegroundColor Green
             }
         } else {
-            Write-Host "[3/7] CUDA dependency deploy skipped." -ForegroundColor Cyan
+            Add-GuiLog "[3/7] CUDA dependency deploy skipped." -ForegroundColor Cyan
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 4 -Title "cuDNN/zlib"
-        }
+        Set-GuiStepProgress -Step 4 -Title "cuDNN/zlib"
     }
     catch {
-        Show-StageError -Stage "Step 3 - cuDNN/zlib" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 3 - cuDNN/zlib" -ErrorRecord $_
         return
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 5 -Title "Python env" -Running
-        }
-        Write-Host "[4/7] Deploying Python environment ($envName)..." -ForegroundColor Yellow
+        Set-GuiStepProgress -Step 5 -Title "Python env" -Running
+        Add-GuiLog "[4/7] Deploying Python environment ($envName)..." -ForegroundColor Yellow
         $fullEnvPath = "$activeCondaPath\envs\$envName"
         $envVersionFile = Join-Path $fullEnvPath ".pipeline_env_version"
-        $desiredEnvStamp = "$ScriptVer|$cudaTrackTag"
+        $desiredEnvStamp = "$CondaEnvVer|$cudaTrackTag"
         $needEnvUpdate = $true
 
         if (Test-Path $fullEnvPath) {
@@ -1065,28 +1299,26 @@ function Invoke-PipelineSetupV2 {
                 $installedEnvVersion = if ($null -eq $installedEnvVersionRaw) { "" } else { $installedEnvVersionRaw.ToString().Trim() }
                 if ($installedEnvVersion -eq $desiredEnvStamp) {
                     $needEnvUpdate = $false
-                    Write-Host "    [SKIP] Environment is already up to date: $desiredEnvStamp" -ForegroundColor Cyan
+                    Add-GuiLog "    [SKIP] Environment is already up to date: $desiredEnvStamp" -ForegroundColor Cyan
                 }
             }
         }
 
         if ($needEnvUpdate) {
             if (Test-Path $fullEnvPath) {
-                if (-not $DebugMode) { Set-GuiSubProgress -Percent 20 }
+                Set-GuiSubProgress -Percent 20
                 Remove-Item -Path $fullEnvPath -Recurse -Force
             }
             New-Item -ItemType Directory -Force -Path $fullEnvPath | Out-Null
-            if (-not $DebugMode) { Set-GuiSubProgress -Percent 40 }
-            Expand-Archive -Path "$sourcePath\pkgs\$envZipFile" -DestinationPath $fullEnvPath -Force
+            Set-GuiSubProgress -Percent 0
+            Expand-ArchiveWithGuiProgress -ZipPath "$sourcePath\pkgs\$envZipFile" -DestinationPath $fullEnvPath -StartPercent 0 -EndPercent 95
             Set-Content -Path $envVersionFile -Value $desiredEnvStamp -Encoding ASCII -Force
-            Write-Host "    [OK] Environment deployed: $desiredEnvStamp" -ForegroundColor Green
+            Add-GuiLog "    [OK] Environment deployed: $desiredEnvStamp" -ForegroundColor Green
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 5 -Title "Python env"
-        }
+        Set-GuiStepProgress -Step 5 -Title "Python env"
     }
     catch {
-        Show-StageError -Stage "Step 4 - Python env" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 4 - Python env" -ErrorRecord $_
         return
     }
 
@@ -1097,9 +1329,7 @@ function Invoke-PipelineSetupV2 {
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 6 -Title "PATH" -Running
-        }
+        Set-GuiStepProgress -Step 6 -Title "PATH" -Running
         $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
         if ($null -eq $currentPath) {
             $currentPath = ""
@@ -1122,58 +1352,50 @@ function Invoke-PipelineSetupV2 {
         }
 
         if ($needPathRegistration) {
-            Write-Host "[5/7] Updating user PATH for CUDA/TensorRT..." -ForegroundColor Yellow
+            Add-GuiLog "[5/7] Updating user PATH for CUDA/TensorRT..." -ForegroundColor Yellow
             $isChanged = $false
             foreach ($path in $targetPaths) {
                 if ((Test-Path $path) -and ($currentPath -notmatch [regex]::Escape($path))) {
                     $currentPath = $currentPath.TrimEnd(';') + ";" + $path
                     $isChanged = $true
-                    Write-Host "    [ADD] $path" -ForegroundColor Green
+                    Add-GuiLog "    [ADD] $path" -ForegroundColor Green
                 }
             }
             if ($isChanged) {
                 [System.Environment]::SetEnvironmentVariable("Path", $currentPath, "User")
             }
         } else {
-            Write-Host "[5/7] PATH update skipped (already up to date)." -ForegroundColor Cyan
+            Add-GuiLog "[5/7] PATH update skipped (already up to date)." -ForegroundColor Cyan
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 6 -Title "PATH"
-        }
+        Set-GuiStepProgress -Step 6 -Title "PATH"
     }
     catch {
-        Show-StageError -Stage "Step 5 - PATH" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 5 - PATH" -ErrorRecord $_
         return
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 7 -Title "TRT_PATH" -Running
-        }
+        Set-GuiStepProgress -Step 7 -Title "TRT_PATH" -Running
         $currentTrtPath = [System.Environment]::GetEnvironmentVariable("TRT_PATH", "User")
         $needTrtPathUpdate = ($installPlanKeys -contains "TRT") -or [string]::IsNullOrWhiteSpace($currentTrtPath) -or ($currentTrtPath -ne $desiredTrtPath)
         if ($needTrtPathUpdate) {
-            Write-Host "[6/7] Setting TRT_PATH..." -ForegroundColor Yellow
+            Add-GuiLog "[6/7] Setting TRT_PATH..." -ForegroundColor Yellow
             [System.Environment]::SetEnvironmentVariable("TRT_PATH", $desiredTrtPath, "User")
         } else {
-            Write-Host "[6/7] TRT_PATH update skipped." -ForegroundColor Cyan
+            Add-GuiLog "[6/7] TRT_PATH update skipped." -ForegroundColor Cyan
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 7 -Title "TRT_PATH"
-        }
+        Set-GuiStepProgress -Step 7 -Title "TRT_PATH"
     }
     catch {
-        Show-StageError -Stage "Step 6 - TRT_PATH" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 6 - TRT_PATH" -ErrorRecord $_
         return
     }
 
     try {
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 8 -Title "Eval Tools" -Running
-        }
-        Write-Host "[7/7] Deploying Eval Tools..." -ForegroundColor Yellow
+        Set-GuiStepProgress -Step 8 -Title "Eval Tools" -Running
+        Add-GuiLog "[7/7] Deploying Eval Tools..." -ForegroundColor Yellow
         $evalToolsVersionFile = Join-Path $evalToolsDest ".pipeline_evaltools_version"
-        $desiredEvalToolsStamp = "$ScriptVer"
+        $desiredEvalToolsStamp = "$EvaltoolsVer"
         $needEvalToolsUpdate = $true
 
         if (Test-Path $evalToolsDest) {
@@ -1182,7 +1404,7 @@ function Invoke-PipelineSetupV2 {
                 $installedEvalToolsVersion = if ($null -eq $installedEvalToolsVersionRaw) { "" } else { $installedEvalToolsVersionRaw.ToString().Trim() }
                 if ($installedEvalToolsVersion -eq $desiredEvalToolsStamp) {
                     $needEvalToolsUpdate = $false
-                    Write-Host "    [SKIP] Eval Tools are already up to date: $desiredEvalToolsStamp" -ForegroundColor Cyan
+                    Add-GuiLog "    [SKIP] Eval Tools are already up to date: $desiredEvalToolsStamp" -ForegroundColor Cyan
                 }
             }
         }
@@ -1193,39 +1415,30 @@ function Invoke-PipelineSetupV2 {
             }
 
             if (Test-Path $evalToolsDest) {
-                if (-not $DebugMode) { Set-GuiSubProgress -Percent 20 }
+                Set-GuiSubProgress -Percent 20
                 Remove-Item -Path $evalToolsDest -Recurse -Force
             }
 
             New-Item -ItemType Directory -Force -Path $evalToolsDest | Out-Null
-            if (-not $DebugMode) { Set-GuiSubProgress -Percent 50 }
-            Expand-Archive -Path "$sourcePath\pkgs\$evalToolsZipFile" -DestinationPath "$evalToolsDest" -Force
+            Set-GuiSubProgress -Percent 0
+            Expand-ArchiveWithGuiProgress -ZipPath "$sourcePath\pkgs\$evalToolsZipFile" -DestinationPath "$evalToolsDest" -StartPercent 0 -EndPercent 95
             Set-Content -Path $evalToolsVersionFile -Value $desiredEvalToolsStamp -Encoding ASCII -Force
-            Write-Host "    [OK] Eval Tools deployed: $evalToolsDest ($desiredEvalToolsStamp)" -ForegroundColor Green
+            Add-GuiLog "    [OK] Eval Tools deployed: $evalToolsDest ($desiredEvalToolsStamp)" -ForegroundColor Green
         }
-        if (-not $DebugMode) {
-            Set-GuiStepProgress -Step 8 -Title "Eval Tools"
-        }
+        Set-GuiStepProgress -Step 8 -Title "Eval Tools"
     }
     catch {
-        Show-StageError -Stage "Step 7 - Eval Tools" -ErrorRecord $_ -DebugMode $DebugMode
+        Show-StageError -Stage "Step 7 - Eval Tools" -ErrorRecord $_
         return
     }
 
-    Write-Host ""
-    Write-Host "#============================================================#" -ForegroundColor Cyan
-    Write-Host "# [DONE] All setup steps completed                           #" -ForegroundColor Cyan
-    Write-Host "#============================================================#" -ForegroundColor Cyan
-    Write-Host "Open a new terminal to apply PATH changes." -ForegroundColor Cyan
-    Write-Host "Conda command: conda activate $envName" -ForegroundColor Cyan
-    if (-not $DebugMode) {
-        Set-GuiStepProgress -Step 8 -Title "Completed"
-    }
-
-    if ($DebugMode) {
-        $null = Read-Host "Press Enter to exit"
-    } else {
-        Add-GuiLog "All setup steps completed successfully."
-        Wait-GuiLogWindowClose
-    }
+    Add-GuiLog ""
+    Add-GuiLog "#============================================================#" -ForegroundColor Cyan
+    Add-GuiLog "# [DONE] All setup steps completed                           #" -ForegroundColor Cyan
+    Add-GuiLog "#============================================================#" -ForegroundColor Cyan
+    Add-GuiLog "Open a new terminal to apply PATH changes." -ForegroundColor Cyan
+    Add-GuiLog "Conda command: conda activate $envName" -ForegroundColor Cyan
+    Set-GuiStepProgress -Step 8 -Title "Completed"
+    Add-GuiLog "All setup steps completed successfully."
+    Wait-GuiLogWindowClose
 }

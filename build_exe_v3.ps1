@@ -10,18 +10,11 @@ param(
     [string]$Company = "LG Ensol",
     [string]$Copyright = "Vision AI Team",
     [ValidatePattern('^\d+\.\d+(\.\d+\.\d+)?$')]
-    [string]$Version = "3.1.0.0",
+    [string]$Version = "3.1.1.0",
     [string]$IconFile = ""
 )
 
 $ErrorActionPreference = "Stop"
-
-# -----------------------------------------------------------------------------
-# v3 EXE 빌드 스크립트
-# - 배포 런타임 진입점은 BAT가 아니라 EXE 하나로 통일한다.
-# - GUI/DEV wrapper + core script를 병합해 ps2exe로 컴파일한다.
-# - EXE 자체가 관리자 권한을 요청하므로 BAT 기반 승격 단계는 더 이상 필요 없다.
-# -----------------------------------------------------------------------------
 
 $root = $PSScriptRoot
 $outPath = Join-Path $root $OutDir
@@ -41,7 +34,7 @@ if (-not (Test-Path $sourceScript)) {
 }
 
 $exeName = if ($Target -eq "gui") {
-    "pipeline_gui_v3.exe"
+    "pipeline_gui_v3_$($Version -replace '\.', '_').exe"
 } else {
     "pipeline_dev_v3.exe"
 }
@@ -66,21 +59,11 @@ if (-not (Test-Path $coreScript)) {
 $entryContent = Get-Content -Path $sourceScript -Raw
 $coreContent  = Get-Content -Path $coreScript  -Raw
 
-# param() 블록은 스크립트 최상단에만 있어야 동작한다.
-# 현재 v3 wrapper는 사실상 param이 없지만, 추후 확장을 위해 병합 로직은 유지한다.
-# 진입점의 param 블록 추출 → 코어 → 나머지 진입점 순으로 병합한다.
-$paramMatch = [regex]::Match($entryContent, '(?s)^\s*(param\s*\(.*?\))\s*')
-$paramBlock = if ($paramMatch.Success) { $paramMatch.Groups[1].Value.Trim() } else { "" }
-
 $entryStripped = $entryContent `
     -replace '(?s)^\s*param\s*\(.*?\)\s*', '' `
     -replace '(?m)^\s*\.\s+"?\$PSScriptRoot\\pipeline_core_v3\.ps1"?\s*$', ''
 
-if ($paramBlock) {
-    $mergedContent = $paramBlock + "`r`n`r`n" + $coreContent + "`r`n" + $entryStripped
-} else {
-    $mergedContent = $coreContent + "`r`n" + $entryStripped
-}
+$mergedContent = $coreContent + "`r`n" + $entryStripped
 
 $tempScript = Join-Path $env:TEMP ("pipeline_merged_" + [guid]::NewGuid().ToString("N") + ".ps1")
 Set-Content -Path $tempScript -Value $mergedContent -Encoding UTF8
