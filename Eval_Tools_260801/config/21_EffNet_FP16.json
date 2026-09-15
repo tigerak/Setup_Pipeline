@@ -1,0 +1,23 @@
+{
+    "trt_path": "C:\\TensorRT-8.5.3.1\\bin\\trtexec.exe",
+    "onnx_path": "C:/Users/LGES/Desktop/onnx_file/ftf_folding_anode/inference_test_2170_260324/best_weights_dynamic.onnx",
+    "engine_path": "C:/Users/LGES/Desktop/onnx_file/ftf_folding_anode/inference_test_2170_260324/best_weights_dynamic.trt",
+    "dynamic_batch": false,
+    "min_shape": "1x3x224x224",
+    "opt_shape": "100x3x224x224",
+    "max_shape": "100x3x224x224",
+    "layer_name": "images",
+    "precision": "FP16",
+    "use_custom_script": false,
+    "fp32_keywords": "Softmax, ReduceMean, Pow, Sqrt",
+    "auto_test": true,
+    "sim_resize": "800, 800",
+    "sim_mean": "0.5, 0.5, 0.5",
+    "sim_std": "1.0, 1.0, 1.0",
+    "sim_class_num": 3,
+    "sim_class_names": [
+        "OK",
+        "NG",
+        ""
+    ]
+}

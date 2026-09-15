@@ -1,0 +1,28 @@
+{
+    "trt_path": "C:\\TensorRT-8.5.3.1\\bin\\trtexec.exe",
+    "onnx_path": "D:/jonghyeok/work/04.NFF_Inspection/05.IMAGES/shared/plab/CCW_LFW/ccw/ccw.onnx",
+    "engine_path": "D:/jonghyeok/work/04.NFF_Inspection/05.IMAGES/shared/plab/CCW_LFW/ccw/ccw.trt",
+    "dynamic_batch": false,
+    "min_shape": "1x3x224x224",
+    "opt_shape": "100x3x224x224",
+    "max_shape": "100x3x224x224",
+    "layer_name": "input",
+    "precision": "FP16",
+    "use_custom_script": false,
+    "fp32_keywords": "Softmax, ReduceMean, Pow, Sqrt",
+    "auto_test": true,
+    "val_img_dir": "",
+    "val_resize": "384,384",
+    "val_mean": "0.5, 0.5, 0.5",
+    "val_std": "1.0, 1.0, 1.0",
+    "val_task": "Classification",
+    "sim_resize": "384, 384",
+    "sim_mean": "0.5, 0.5, 0.5",
+    "sim_std": "1.0, 1.0, 1.0",
+    "sim_class_num": 3,
+    "sim_class_names": [
+        "OK",
+        "NG_OVER",
+        "NG_WEAK"
+    ]
+}

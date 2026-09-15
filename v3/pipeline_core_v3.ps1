@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 # - CondaEnvVer: Python 가상 환경(visionAI) 패키지 버전
 # - EvaltoolsVer: Eval Tools 패키지 버전
 $script:DefaultCondaEnvVer = "260706"
-$script:DefaultEvaltoolsVer = "260706"
+$script:DefaultEvaltoolsVer = "260727"
 
 $script:GuiLogForm = $null
 $script:GuiLogRichTextBox = $null

@@ -1,0 +1,14 @@
+{
+    "trt_path": "C:\\TensorRT-8.5.3.1\\bin\\trtexec.exe",
+    "onnx_path": "D:/jonghyeok/work/04.NFF_Inspection/05.IMAGES/shared/models/SURFACE_ANODE/SURFACE_DINO_0616_class10_re/f1_score0.9684_Loss0.0735337_epoch18.onnx",
+    "engine_path": "D:/jonghyeok/work/04.NFF_Inspection/05.IMAGES/shared/models/SURFACE_ANODE/SURFACE_DINO_0616_class10_re/f1_score0.9684_Loss0.0735337_epoch18.trt",
+    "dynamic_batch": true,
+    "min_shape": "1x3x518x518",
+    "opt_shape": "1x3x518x518",
+    "max_shape": "1x3x518x518",
+    "layer_name": "input",
+    "precision": "FP16",
+    "use_custom_script": true,
+    "fp32_keywords": "Softmax, ReduceMean, Pow, Sqrt",
+    "auto_test": true
+}

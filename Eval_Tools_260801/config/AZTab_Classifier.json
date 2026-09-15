@@ -1,0 +1,13 @@
+{
+    "trt_path": "C:/TensorRT-10.12.0.36.Windows.win10.cuda-12.9/TensorRT-10.12.0.36/bin/trtexec.exe",
+    "onnx_path": "D:/jonghyeok/work/04.NFF_Inspection/04.TAB_FOLDING/DETECTION/AZ/vision/engine/classifier_0312.onnx",
+    "engine_path": "D:/jonghyeok/work/04.NFF_Inspection/04.TAB_FOLDING/DETECTION/AZ/vision/engine/classifier_0312.engine",
+    "dynamic_batch": true,
+    "min_shape": "1x3x128x128",
+    "opt_shape": "5x3x128x128",
+    "max_shape": "5x3x128x128",
+    "layer_name": "images",
+    "precision": "FP16",
+    "use_custom_script": false,
+    "fp32_keywords": "Softmax, ReduceMean, Pow, Sqrt"
+}

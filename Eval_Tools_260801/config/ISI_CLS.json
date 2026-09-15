@@ -1,0 +1,20 @@
+{
+    "trt_path": "C:/TensorRT-10.12.0.36.Windows.win10.cuda-12.9/TensorRT-10.12.0.36/bin/trtexec.exe",
+    "onnx_path": "D:/jonghyeok/work/04.NFF_Inspection/01.Analysis/NFF_ModelDeveloper/models/save/ISI_TASK_260714/AZ/ISI/cls_model_0714.onnx",
+    "engine_path": "D:/jonghyeok/work/04.NFF_Inspection/01.Analysis/NFF_ModelDeveloper/models/save/ISI_TASK_260714/AZ/ISI/cls_model_0714.engine",
+    "dynamic_batch": true,
+    "min_shape": "1x3x224x224",
+    "opt_shape": "5x3x224x224",
+    "max_shape": "5x3x224x224",
+    "layer_name": "images",
+    "precision": "FP16",
+    "use_custom_script": false,
+    "fp32_keywords": "Softmax, ReduceMean, Pow, Sqrt",
+    "auto_test": true,
+    "val_img_dir": "D:/jonghyeok/work/04.NFF_Inspection/01.Analysis/NFF_ModelDeveloper/models/save/ISI_TASK_260714/AZ/ISI/0707_result/origin",
+    "val_resize": "224,224",
+    "val_mean": "0.0, 0.0, 0.0",
+    "val_std": "1.0, 1.0, 1.0",
+    "val_task": "Classification",
+    "val_pixel_threshold": 5.0
+}

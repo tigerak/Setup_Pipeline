@@ -1,0 +1,13 @@
+{
+    "engine_path": "D:/jonghyeok/work/04.NFF_Inspection/02.DAP/TensorRT/Equipment/LHS/Model/260414/LHS_opset17_fp32.trt",
+    "opt_shape": "1x3x800x800",
+    "sim_resize": "800, 800",
+    "sim_mean": "0.5, 0.5, 0.5",
+    "sim_std": "1.0, 1.0, 1.0",
+    "sim_class_num": 3,
+    "sim_class_names": [
+        "OK",
+        "NG",
+        ""
+    ]
+}

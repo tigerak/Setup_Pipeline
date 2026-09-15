@@ -1,3 +1,7 @@
 /pkgs/
 /dist/
-# /v*/
+
+# 
+/_tmp_pkg_probe/
+/.venv/
+/.vscode/
