@@ -1,5 +1,8 @@
+/__pycache__/
 /pkgs/
 /dist/
+/requirements/logs/
+/requirements/wheelhouse/
 
 # 
 /_tmp_pkg_probe/
