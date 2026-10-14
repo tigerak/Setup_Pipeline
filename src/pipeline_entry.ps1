@@ -1,31 +1,33 @@
 # ============================================================================
-# v4 GUI용 실행 진입 스크립트
+# GUI용 실행 진입 스크립트
 # ============================================================================
 
 Set-StrictMode -Version Latest
 
-# 로컬 설정 로드
-. "$PSScriptRoot\local_config.ps1"
+# 로컬 사용자 설정 로드
+$localConfigCandidatePaths = @(
+    (Join-Path (Split-Path -Parent $PSScriptRoot) "local_config.ps1"),
+    (Join-Path $PSScriptRoot "local_config.ps1")
+)
 
-# 파이프라인 설정 로드
+$localConfigPath = $localConfigCandidatePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($null -ne $localConfigPath) {
+    . $localConfigPath
+}
+
+# 공용 기본 설정 로드
 . "$PSScriptRoot\pipeline_config.ps1"
 
-# ============================================================================
-# local_config의 값으로 pipeline_config 오버라이드
-# ============================================================================
-
+# 로컬 설정이 있으면 기본값을 override한다.
+# 엔트리 파일은 값 선언이 아니라 merge만 수행한다.
 if ($null -ne $script:LocalConfig) {
-    # 버전 관리
-    if ($script:LocalConfig.DefaultCondaEnvVer) {
-        $script:PipelineConfig.DefaultCondaEnvVer = $script:LocalConfig.DefaultCondaEnvVer
-    }
-    if ($script:LocalConfig.DefaultEvaltoolsVer) {
-        $script:PipelineConfig.DefaultEvaltoolsVer = $script:LocalConfig.DefaultEvaltoolsVer
-    }
-    
-    # 패키지 소스 경로 관리
-    if ($script:LocalConfig.PackageSourceRoot) {
-        $script:PipelineConfig.PackageSourceRoot = $script:LocalConfig.PackageSourceRoot
+    foreach ($propertyName in @("CondaEnvVer", "EvaltoolsVer", "PackageSourceRoot", "RemotePackageSourceRoot")) {
+        if ($script:LocalConfig.PSObject.Properties.Name -contains $propertyName) {
+            $value = $script:LocalConfig.$propertyName
+            if (-not [string]::IsNullOrWhiteSpace([string]$value)) {
+                $script:PipelineConfig.$propertyName = $value
+            }
+        }
     }
 }
 
@@ -36,9 +38,37 @@ $ui = New-SetupPipelineUi
 Set-PipelineUi -Ui $ui
 $ui.Initialize()
 
+$setupCompleted = $false
+
 try {
-    Invoke-PipelineSetup -Ui $ui
+    $setupResult = Invoke-PipelineSetup -Ui $ui
+    if ($setupResult -eq $false) {
+        $ui.Log("")
+        $ui.Log("[ENTRY] Setup stopped by user decision or step skip.")
+        $ui.GuiCloseButton.Enabled = $true
+        $ui.GuiCloseButton.Visible = $true
+        $setupCompleted = $false
+    }
+    else {
+        $setupCompleted = $true
+    }
+}
+catch {
+    $message = $_.Exception.Message
+    $ui.Log("")
+    $ui.Log("[ENTRY] Setup halt: $message", [System.ConsoleColor]::Red)
+    $ui.SetTopMost($true)
+    [System.Windows.Forms.MessageBox]::Show($message, "Setup Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
+    $setupCompleted = $false
 }
 finally {
-    $ui.WaitClose()
+    if ($setupCompleted) {
+        $ui.WaitClose()
+    }
+    else {
+        $ui.Log("")
+        $ui.Log("Setup paused or did not complete normally. Review the log, then click Close to exit.")
+        $ui.GuiCloseButton.Enabled = $true
+        $ui.GuiCloseButton.Visible = $true
+    }
 }

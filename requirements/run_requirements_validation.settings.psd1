@@ -2,19 +2,21 @@
     Tracks = @{
         default = @{
             SourceBuildRequirementMap = @{
-                default = @('setuptools', 'wheel')
-                pycuda = @('setuptools', 'wheel', 'oldest-supported-numpy')
+                default = @(
+                    'setuptools==75.8.2',
+                    'wheel==0.45.1'
+                )
+                pycuda = @(
+                    'setuptools==75.8.2',
+                    'wheel==0.45.1',
+                    'oldest-supported-numpy==2023.12.21'
+                )
             }
-            LockExcludePackages = @()
-        }
-        api = @{
-            LockExcludePackages = @()
-        }
-        cu11 = @{
-            LockExcludePackages = @('setuptools', 'wheel', 'oldest-supported-numpy')
-        }
-        cu12 = @{
-            LockExcludePackages = @('setuptools', 'wheel', 'oldest-supported-numpy')
+            LockExcludePackages = @(
+                'setuptools',
+                'wheel',
+                'oldest-supported-numpy'
+            )
         }
     }
 }

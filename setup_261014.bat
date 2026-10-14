@@ -16,14 +16,8 @@ if %errorlevel% neq 0 (
 
 set "SCRIPT_DIR=%~dp0"
 set "SRC_DIR=%SCRIPT_DIR%src"
-set "SETUP_CONFIG_PS1=%SRC_DIR%\setup_config.ps1"
+set "LOCAL_CONFIG_PS1=%SCRIPT_DIR%local_config.ps1"
 set "PIPELINE_ENTRY_PS1=%SRC_DIR%\pipeline_entry.ps1"
-
-if not exist "%SETUP_CONFIG_PS1%" (
-    echo [ERROR] Script not found: "%SETUP_CONFIG_PS1%"
-    pause
-    exit /b 1
-)
 
 if not exist "%PIPELINE_ENTRY_PS1%" (
     echo [ERROR] Script not found: "%PIPELINE_ENTRY_PS1%"
@@ -32,9 +26,10 @@ if not exist "%PIPELINE_ENTRY_PS1%" (
 )
 
 REM ============================================================================
-REM 사용자 설정 입력 및 GUI 자동 시작
+REM pipeline_entry.ps1 실행
 REM ============================================================================
-
-powershell -NoProfile -ExecutionPolicy Bypass -NoExit -Command "& '%SETUP_CONFIG_PS1%' -PipelineEntry '%PIPELINE_ENTRY_PS1%'"
+REM 배치 콘솔은 즉시 종료하고, 설치 GUI만 별도 프로세스로 띄운다.
+REM 설치 창은 종료 시 자동으로 닫히지 않고 사용자가 직접 닫을 때까지 유지한다.
+start "" /b powershell.exe -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "%PIPELINE_ENTRY_PS1%"
 
 exit /b 0

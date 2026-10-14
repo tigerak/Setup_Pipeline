@@ -117,17 +117,17 @@ set "PS1_ARGS=-ExecutionPolicy Bypass -File "%PS1_PATH%" -Track %TRACK% -EnvPref
 if /i "%SYNC_LOCK%"=="yes" set "PS1_ARGS=%PS1_ARGS% -SyncLock"
 if /i "%REMOVE_VALIDATION_ENV%"=="yes" set "PS1_ARGS=%PS1_ARGS% -RemoveValidationEnv"
 if /i "%BUILD_TEMP_CACHE%"=="yes" (
-    set "PS1_ARGS=%PS1_ARGS% -BuildTempWheelCache"
-    if /i "%CLEAR_TEMP_CACHE%"=="yes" set "PS1_ARGS=%PS1_ARGS% -ClearTempWheelCache"
-    if not "%WHEEL_OUTPUT_ROOT%"=="" set "PS1_ARGS=%PS1_ARGS% -WheelOutputRoot %WHEEL_OUTPUT_ROOT%"
+    set "PS1_ARGS=!PS1_ARGS! -BuildTempWheelCache"
+    if /i "%CLEAR_TEMP_CACHE%"=="yes" set "PS1_ARGS=!PS1_ARGS! -ClearTempWheelCache"
+    if not "%WHEEL_OUTPUT_ROOT%"=="" set "PS1_ARGS=!PS1_ARGS! -WheelOutputRoot %WHEEL_OUTPUT_ROOT%"
 )
 if /i "%BUILD_APPROVED_WHEELHOUSE%"=="yes" (
-    set "PS1_ARGS=%PS1_ARGS% -BuildApprovedWheelhouse"
-    if /i "%CLEAR_TEMP_CACHE%"=="yes" set "PS1_ARGS=%PS1_ARGS% -ClearTempWheelCache"
-    if /i "%CLEAR_APPROVED_WHEELHOUSE%"=="yes" set "PS1_ARGS=%PS1_ARGS% -ClearApprovedWheelhouse"
-    if /i "%VERIFY_OFFLINE%"=="yes" set "PS1_ARGS=%PS1_ARGS% -VerifyOfflineInstall"
-    if /i "%REMOVE_OFFLINE_ENV%"=="yes" set "PS1_ARGS=%PS1_ARGS% -RemoveOfflineEnv"
-    if not "%WHEEL_OUTPUT_ROOT%"=="" set "PS1_ARGS=%PS1_ARGS% -WheelOutputRoot %WHEEL_OUTPUT_ROOT%"
+    set "PS1_ARGS=!PS1_ARGS! -BuildApprovedWheelhouse"
+    if /i "%CLEAR_TEMP_CACHE%"=="yes" set "PS1_ARGS=!PS1_ARGS! -ClearTempWheelCache"
+    if /i "%CLEAR_APPROVED_WHEELHOUSE%"=="yes" set "PS1_ARGS=!PS1_ARGS! -ClearApprovedWheelhouse"
+    if /i "%VERIFY_OFFLINE%"=="yes" set "PS1_ARGS=!PS1_ARGS! -VerifyOfflineInstall"
+    if /i "%REMOVE_OFFLINE_ENV%"=="yes" set "PS1_ARGS=!PS1_ARGS! -RemoveOfflineEnv"
+    if not "%WHEEL_OUTPUT_ROOT%"=="" set "PS1_ARGS=!PS1_ARGS! -WheelOutputRoot %WHEEL_OUTPUT_ROOT%"
 )
 
 echo.
@@ -152,7 +152,7 @@ echo Verify offline  : %VERIFY_OFFLINE%
 if /i "%VERIFY_OFFLINE%"=="yes" echo Remove offline  : %REMOVE_OFFLINE_ENV%
 echo Wheel root      : %WHEEL_OUTPUT_ROOT%
 echo.
-echo Command: powershell %PS1_ARGS%
+echo Command: powershell -NoProfile -ExecutionPolicy Bypass %PS1_ARGS%
 echo.
 call :ASK_CHOICE "Run this command? [Y/N]: " "Y N" RUN_CONFIRM
 if /i "%RUN_CONFIRM%"=="N" goto MENU
@@ -186,7 +186,7 @@ echo Full PowerShell transcript log will be saved by the .ps1 script.
 echo Launcher metadata log: "%RUN_LOG_FILE%"
 echo.
 
-powershell %PS1_ARGS%
+powershell -NoProfile -ExecutionPolicy Bypass %PS1_ARGS%
 set "EXIT_CODE=%errorlevel%"
 
 (

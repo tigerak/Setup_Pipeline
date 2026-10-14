@@ -1,0 +1,13 @@
+### 1. 배치파일이 관리자 권한을 못지 못할 때
+배치파일 우클릭 후 관리자 권한으로 실행
+
+### 2. 설치 중 (주로 삭제 step에서) 경로에 접근할 수 없다는 오류가 뜰 때
+PowerShell 실행 후
+>> Get-Process python, pythonw, conda, trtexec -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+### 3. miniconda 설치시 아래와 같은 문제 발생
+[Step 1 - Miniconda] Failed: Process failed with exit code 2: D:\visionAI\Setup_Pipeline\pkgs\Miniconda3-py310_24.9.2-0-Windows-x86_64.exe
+Exception Type: System.Management.Automation.RuntimeException
+주로 가상환경 물고 있는 프로그램이 있기 때문이므로 
+2번 실행 후
+C:\ProgramData 에서 miniconda 폴더 직접 삭제

@@ -1,15 +1,24 @@
-﻿annotated-types==0.8.0
+﻿--find-links wheelhouse/approved/common
+--no-index
+annotated-types==0.8.0
 anyio==4.15.1
 certifi==2026.7.22
-charset-normalizer==3.5.1
+charset-normalizer==3.5.2
 click==8.5.0
 exceptiongroup==1.3.1
 fastapi==0.110.0
 h11==0.16.0
 idna==3.20
+numpy==1.26.4
+opencv-python==4.10.0.84
 pydantic==2.10.6
 pydantic-core==2.27.2
+pyqt5==5.15.11
+pyqt5-qt5==5.15.2
+pyqt5-sip==12.20.0
+pyyaml==6.0.2
 requests==2.34.2
+scipy==1.15.3
 starlette==0.36.3
 typing-extensions==4.16.0
 urllib3==2.8.0

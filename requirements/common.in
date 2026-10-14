@@ -1,0 +1,19 @@
+# Common
+# Build-helper pins must stay on a compatibility baseline instead of drifting to the newest releases.
+setuptools==75.8.2
+wheel==0.45.1
+# oldest-supported-numpy is downloaded as a shared build helper for source artifacts.
+
+numpy==1.26.4
+scipy==1.15.3
+
+PyQt5==5.15.11
+
+opencv-python==4.10.0.84
+PyYAML==6.0.2
+
+# API
+fastapi==0.110.0
+uvicorn==0.27.0
+pydantic==2.10.6
+requests==2.34.2

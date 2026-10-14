@@ -109,13 +109,14 @@ function New-SetupPipelineUi {
             $disabledForeColor = [System.Drawing.SystemColors]::GrayText
 
             $Button.Add_EnabledChanged({
-                if ($this.Enabled) {
-                    $this.BackColor = $enabledBackColor
-                    $this.ForeColor = $enabledForeColor
+                $button = $this
+                if ($button.Enabled) {
+                    $button.BackColor = [System.Drawing.SystemColors]::Control
+                    $button.ForeColor = [System.Drawing.SystemColors]::ControlText
                 }
                 else {
-                    $this.BackColor = $disabledBackColor
-                    $this.ForeColor = $disabledForeColor
+                    $button.BackColor = [System.Drawing.SystemColors]::ControlLight
+                    $button.ForeColor = [System.Drawing.SystemColors]::GrayText
                 }
             })
 
@@ -290,19 +291,20 @@ function New-SetupPipelineUi {
         return ($this.GuiDecision -eq $true)
     }
 
-    $ui | Add-Member -MemberType ScriptMethod -Name ShowStepInstallDecision -Value {
+    $ui | Add-Member -MemberType ScriptMethod -Name ShowInstallDecision -Value {
         param(
             [string]$StepTitle,
             [string[]]$DetailLines,
             [bool]$IsWarning = $false
         )
 
-        # 각 스텝 설치 여부를 묻는 공통 확인 팝업.
-        # MessageBox 대신 구조화된 Form을 사용해 항목 가독성과 형식 일관성을 높인다.
+        $warningAccentColor = [System.Drawing.Color]::FromArgb(150, 52, 42)
+
+        # 일반 설치 단계용 팝업.
         $form = New-Object System.Windows.Forms.Form
         $form.Text = if ($IsWarning) { "WARNING - $StepTitle" } else { "Setup Confirmation - $StepTitle" }
-        $form.Width = 980
-        $form.Height = 560
+        $form.Width = 860
+        $form.Height = 470
         $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
         $form.TopMost = $true
         $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
@@ -316,7 +318,7 @@ function New-SetupPipelineUi {
         $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
         $titleLabel.Text = if ($IsWarning) { "Warning: Destructive Action Confirmation" } else { "Install Step Confirmation" }
         if ($IsWarning) {
-            $titleLabel.ForeColor = [System.Drawing.Color]::Firebrick
+            $titleLabel.ForeColor = $warningAccentColor
         }
         $form.Controls.Add($titleLabel)
 
@@ -333,32 +335,31 @@ function New-SetupPipelineUi {
         $hintLabel.Left = 16
         $hintLabel.Top = 64
         if ($IsWarning) {
-            $hintLabel.ForeColor = [System.Drawing.Color]::Firebrick
-            $hintLabel.Text = "This action permanently deletes existing files/environments. Review details carefully before Install."
+            $hintLabel.ForeColor = $warningAccentColor
+            $hintLabel.Text = "This action permanently deletes existing files/environments. Review details carefully before continuing."
         }
         else {
             $hintLabel.ForeColor = [System.Drawing.Color]::DimGray
-            $hintLabel.Text = "Review the step details below, then choose Install, Skip, or Abort."
+            $hintLabel.Text = "Review the step details below, then choose Install or Abort."
         }
         $form.Controls.Add($hintLabel)
 
         $detailView = New-Object System.Windows.Forms.ListView
         $detailView.Left = 16
         $detailView.Top = 92
-        $detailView.Width = 930
-        $detailView.Height = 360
+        $detailView.Width = 810
+        $detailView.Height = 245
         $detailView.View = [System.Windows.Forms.View]::Details
         $detailView.FullRowSelect = $true
         $detailView.GridLines = $true
         $detailView.HideSelection = $false
         $detailView.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-
         $detailRowImageList = New-Object System.Windows.Forms.ImageList
         $detailRowImageList.ImageSize = New-Object System.Drawing.Size(1, 24)
         $detailView.SmallImageList = $detailRowImageList
 
-        [void]$detailView.Columns.Add("Field", 250)
-        [void]$detailView.Columns.Add("Details", 660)
+        [void]$detailView.Columns.Add("Field", 220)
+        [void]$detailView.Columns.Add("Details", 560)
 
         foreach ($rawLine in $DetailLines) {
             $line = if ($null -eq $rawLine) { "" } else { $rawLine.ToString().Trim() }
@@ -366,7 +367,6 @@ function New-SetupPipelineUi {
 
             $itemName = "Note"
             $itemValue = $line
-
             if ($line -match '^([^:]{1,80}):\s*(.*)$') {
                 $itemName = $matches[1].Trim()
                 $itemValue = $matches[2].Trim()
@@ -388,43 +388,61 @@ function New-SetupPipelineUi {
         $actionHintLabel = New-Object System.Windows.Forms.Label
         $actionHintLabel.AutoSize = $true
         $actionHintLabel.Left = 16
-        $actionHintLabel.Top = 465
+        $actionHintLabel.Top = 350
+        $actionHintLabel.ForeColor = [System.Drawing.Color]::DimGray
         if ($IsWarning) {
-            $actionHintLabel.ForeColor = [System.Drawing.Color]::Firebrick
-            $actionHintLabel.Text = "Install: proceed with deletion and reinstall   |   Skip: cancel this destructive step   |   Abort: stop the whole setup"
+            $actionHintLabel.Text = "Install: proceed with deletion and reinstall   |   Skip: leave this step untouched   |   Abort: stop the whole setup"
         }
         else {
-            $actionHintLabel.ForeColor = [System.Drawing.Color]::DimGray
-            $actionHintLabel.Text = "Install: run this step   |   Skip: do not run this step   |   Abort: stop the whole setup"
+            $actionHintLabel.Text = "Install: run this step   |   Skip: leave this step untouched   |   Abort: stop the whole setup"
         }
         $form.Controls.Add($actionHintLabel)
 
         $btnInstall = New-Object System.Windows.Forms.Button
         $btnInstall.Text = if ($IsWarning) { "Delete + Install" } else { "Install" }
-        $btnInstall.Width = 100
+        $btnInstall.Width = 140
         $btnInstall.Height = 32
-        $btnInstall.Left = 598
-        $btnInstall.Top = 488
-        $btnInstall.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+        $btnInstall.Left = 430
+        $btnInstall.Top = 374
+        if ($IsWarning) {
+            $btnInstall.ForeColor = $warningAccentColor
+        }
+        $btnInstall.Add_Click({
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+            $form.Close()
+        })
         $form.Controls.Add($btnInstall)
 
         $btnSkip = New-Object System.Windows.Forms.Button
         $btnSkip.Text = "Skip"
-        $btnSkip.Width = 100
+        $btnSkip.Width = 110
         $btnSkip.Height = 32
-        $btnSkip.Left = 714
-        $btnSkip.Top = 488
-        $btnSkip.DialogResult = [System.Windows.Forms.DialogResult]::No
+        $btnSkip.Left = 585
+        $btnSkip.Top = 374
+        $btnSkip.Add_Click({
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Retry
+            $form.Close()
+        })
         $form.Controls.Add($btnSkip)
 
         $btnAbort = New-Object System.Windows.Forms.Button
         $btnAbort.Text = "Abort"
         $btnAbort.Width = 100
         $btnAbort.Height = 32
-        $btnAbort.Left = 830
-        $btnAbort.Top = 488
-        $btnAbort.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $btnAbort.Left = 710
+        $btnAbort.Top = 374
+        $btnAbort.Add_Click({
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $form.Close()
+        })
         $form.Controls.Add($btnAbort)
+
+        $form.Add_FormClosing({
+            param($sender, $e)
+            if ($sender.DialogResult -eq [System.Windows.Forms.DialogResult]::None) {
+                $sender.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            }
+        })
 
         $form.AcceptButton = $btnInstall
         $form.CancelButton = $btnAbort
@@ -438,9 +456,151 @@ function New-SetupPipelineUi {
 
         switch ($dialogResult) {
             ([System.Windows.Forms.DialogResult]::Yes) { return "Install" }
-            ([System.Windows.Forms.DialogResult]::No) { return "Skip" }
+            ([System.Windows.Forms.DialogResult]::Retry) { return "Skip" }
             default { return "Abort" }
         }
+    }
+
+    $ui | Add-Member -MemberType ScriptMethod -Name ShowDownloadAndInstallDecision -Value {
+        param(
+            [string]$StepTitle,
+            [string[]]$DetailLines
+        )
+
+        # 다운로드 + 설치가 필요한 단계용 팝업.
+        $form = New-Object System.Windows.Forms.Form
+        $form.Text = "Required files missing - $StepTitle"
+        $form.Width = 1040
+        $form.Height = 620
+        $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+        $form.TopMost = $true
+        $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+        $form.MaximizeBox = $false
+        $form.MinimizeBox = $false
+
+        $titleLabel = New-Object System.Windows.Forms.Label
+        $titleLabel.AutoSize = $true
+        $titleLabel.Left = 16
+        $titleLabel.Top = 14
+        $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
+        $titleLabel.Text = "Required files missing" 
+        $titleLabel.ForeColor = [System.Drawing.Color]::DarkOrange
+        $form.Controls.Add($titleLabel)
+
+        $stepLabel = New-Object System.Windows.Forms.Label
+        $stepLabel.AutoSize = $true
+        $stepLabel.Left = 16
+        $stepLabel.Top = 42
+        $stepLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $stepLabel.Text = "Step: $StepTitle"
+        $form.Controls.Add($stepLabel)
+
+        $hintLabel = New-Object System.Windows.Forms.Label
+        $hintLabel.AutoSize = $true
+        $hintLabel.Left = 16
+        $hintLabel.Top = 64
+        $hintLabel.ForeColor = [System.Drawing.Color]::DimGray
+        $hintLabel.Text = "The files below are missing. Download them now and continue installation?"
+        $form.Controls.Add($hintLabel)
+
+        $detailView = New-Object System.Windows.Forms.ListView
+        $detailView.Left = 16
+        $detailView.Top = 92
+        $detailView.Width = 990
+        $detailView.Height = 400
+        $detailView.View = [System.Windows.Forms.View]::Details
+        $detailView.FullRowSelect = $true
+        $detailView.GridLines = $true
+        $detailView.HideSelection = $false
+        $detailView.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $detailRowImageList = New-Object System.Windows.Forms.ImageList
+        $detailRowImageList.ImageSize = New-Object System.Drawing.Size(1, 24)
+        $detailView.SmallImageList = $detailRowImageList
+
+        [void]$detailView.Columns.Add("Field", 250)
+        [void]$detailView.Columns.Add("Details", 700)
+
+        foreach ($rawLine in $DetailLines) {
+            $line = if ($null -eq $rawLine) { "" } else { $rawLine.ToString().Trim() }
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $itemName = "Note"
+            $itemValue = $line
+            if ($line -match '^([^:]{1,80}):\s*(.*)$') {
+                $itemName = $matches[1].Trim()
+                $itemValue = $matches[2].Trim()
+            }
+
+            $row = New-Object System.Windows.Forms.ListViewItem($itemName)
+            [void]$row.SubItems.Add($itemValue)
+            [void]$detailView.Items.Add($row)
+        }
+
+        if ($detailView.Items.Count -eq 0) {
+            $row = New-Object System.Windows.Forms.ListViewItem("Note")
+            [void]$row.SubItems.Add("No missing file details provided.")
+            [void]$detailView.Items.Add($row)
+        }
+
+        $form.Controls.Add($detailView)
+
+        $actionHintLabel = New-Object System.Windows.Forms.Label
+        $actionHintLabel.AutoSize = $true
+        $actionHintLabel.Left = 16
+        $actionHintLabel.Top = 510
+        $actionHintLabel.ForeColor = [System.Drawing.Color]::DimGray
+        $actionHintLabel.Text = "Download + Install: fetch the missing files and continue installation   |   Cancel: stop this download and return to step choice"
+        $form.Controls.Add($actionHintLabel)
+
+        $btnInstall = New-Object System.Windows.Forms.Button
+        $btnInstall.Text = "Download + Install"
+        $btnInstall.Width = 170
+        $btnInstall.Height = 32
+        $btnInstall.Left = 680
+        $btnInstall.Top = 540
+        $btnInstall.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+        $form.Controls.Add($btnInstall)
+
+        $btnCancel = New-Object System.Windows.Forms.Button
+        $btnCancel.Text = "Cancel"
+        $btnCancel.Width = 100
+        $btnCancel.Height = 32
+        $btnCancel.Left = 870
+        $btnCancel.Top = 540
+        $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $form.Controls.Add($btnCancel)
+
+        $form.Add_FormClosing({
+            param($sender, $e)
+            if ($sender.DialogResult -eq [System.Windows.Forms.DialogResult]::None) {
+                $sender.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            }
+        })
+
+        $form.AcceptButton = $btnInstall
+        $form.CancelButton = $btnCancel
+
+        $owner = $null
+        if ($null -ne $this.GuiLogForm -and -not $this.GuiLogForm.IsDisposed) {
+            $owner = $this.GuiLogForm
+        }
+
+        $dialogResult = if ($null -ne $owner) { $form.ShowDialog($owner) } else { $form.ShowDialog() }
+
+        switch ($dialogResult) {
+            ([System.Windows.Forms.DialogResult]::Yes) { return "Install" }
+            default { return "Cancel" }
+        }
+    }
+
+    $ui | Add-Member -MemberType ScriptMethod -Name ShowStepInstallDecision -Value {
+        param(
+            [string]$StepTitle,
+            [string[]]$DetailLines,
+            [bool]$IsWarning = $false
+        )
+
+        return $this.ShowInstallDecision($StepTitle, $DetailLines, $IsWarning)
     }
 
     $ui | Add-Member -MemberType ScriptMethod -Name SelectTensorRTProfile -Value {
@@ -570,14 +730,27 @@ function New-SetupPipelineUi {
     }
 
     $ui | Add-Member -MemberType ScriptMethod -Name WaitClose -Value {
-        if ($null -ne $this.GuiCloseButton -and -not $this.GuiLogForm.IsDisposed) {
-            $this.SetTopMost($true)
+        if ($null -ne $this.GuiLogForm -and -not $this.GuiLogForm.IsDisposed) {
+            $this.SetTopMost($false)
             $this.GuiCloseButton.Enabled = $true
+            $this.GuiCloseButton.Visible = $true
             $this.Log("")
-            $this.Log("Process finished. Click Close to exit.")
+            $this.Log("Process finished. Review the log, then click Close to exit.")
+
             while (-not $this.GuiLogForm.IsDisposed) {
                 [System.Windows.Forms.Application]::DoEvents()
             }
+        }
+    }
+
+    $ui | Add-Member -MemberType ScriptMethod -Name WaitPaused -Value {
+        if ($null -ne $this.GuiLogForm -and -not $this.GuiLogForm.IsDisposed) {
+            $this.SetTopMost($false)
+            $this.GuiCloseButton.Enabled = $true
+            $this.GuiCloseButton.Visible = $true
+            $this.Log("")
+            $this.Log("Download-only mode: paused and waiting for explicit Install. Close to exit.")
+            [System.Windows.Forms.Application]::DoEvents()
         }
     }
 
@@ -602,9 +775,42 @@ function New-SetupPipelineUi {
         )
 
         $msg = "[$Stage] Failed: $($ErrorRecord.Exception.Message)"
+        $detailLines = @()
+
+        if ($null -ne $ErrorRecord.Exception) {
+            $detailLines += "Exception Type: $($ErrorRecord.Exception.GetType().FullName)"
+        }
+
+        if ($null -ne $ErrorRecord.InvocationInfo) {
+            if (-not [string]::IsNullOrWhiteSpace($ErrorRecord.InvocationInfo.ScriptName)) {
+                $detailLines += "Script: $($ErrorRecord.InvocationInfo.ScriptName)"
+            }
+            if ($ErrorRecord.InvocationInfo.ScriptLineNumber -gt 0) {
+                $detailLines += "Line: $($ErrorRecord.InvocationInfo.ScriptLineNumber)"
+            }
+            if (-not [string]::IsNullOrWhiteSpace($ErrorRecord.InvocationInfo.PositionMessage)) {
+                $detailLines += "Position: $($ErrorRecord.InvocationInfo.PositionMessage.Trim())"
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($ErrorRecord.ScriptStackTrace)) {
+            $detailLines += "Stack:"
+            $detailLines += ($ErrorRecord.ScriptStackTrace.Trim() -split "`r?`n")
+        }
+
         $this.Log($msg, [System.ConsoleColor]::Red)
+        foreach ($detailLine in $detailLines) {
+            $this.Log($detailLine, [System.ConsoleColor]::DarkRed)
+        }
+
         $this.SetTopMost($true)
-        [void][System.Windows.Forms.MessageBox]::Show($msg, "Setup Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
+        $dialogText = if ($detailLines.Count -gt 0) {
+            $msg + "`n`n" + ($detailLines -join "`n")
+        }
+        else {
+            $msg
+        }
+        [void][System.Windows.Forms.MessageBox]::Show($dialogText, "Setup Error", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error)
         $this.WaitClose()
     }
 

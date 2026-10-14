@@ -1,13 +1,14 @@
 $script:PipelineConfig = [pscustomobject]@{
-    # 기본 버전 스탬프
-    DefaultCondaEnvVer = "260909"
-    DefaultEvaltoolsVer = "260801"
-    DefaultEnvName = "visionAI"
+    # 기본 환경/버전 값
+    CondaEnvVer = "260101"
+    EvaltoolsVer = "260101"
+    # 로컬 캐시 루트: 실제 설치와 패키지 소스는 이 경로를 사용한다.
+    PackageSourceRoot = "D:\visionAI\Setup_Pipeline"
+    # 원격 보관소(선택): 로컬 캐시에 없는 파일만 동기화한다.
+    RemotePackageSourceRoot = "\\12.34.56.7\Setup_Pipeline"
 
-    # 패키지 소스 루트 (로컬 또는 네트워크 경로)
-    # 로컬: "D:\Setup_Pipeline" 또는 "C:\packages\setup_pipeline"
-    # 네트워크: "\\14.21.172.34\setup_pipeline" (영구 마운트 또는 인증 필요)
-    PackageSourceRoot = "D:\Setup_Pipeline"
+    # 기본 환경 이름
+    DefaultEnvName = "visionAI"
 
     # CUDA 감지 기준
     TargetCudaVersion_1 = "11.8"
@@ -40,9 +41,31 @@ $script:PipelineConfig = [pscustomobject]@{
     PythonVersion = "3.10"
     # 오프라인 pip 설치용 requirements lock 파일 경로 (상대경로: source root 기준)
     RequirementsWheelhouseRoot = "requirements\wheelhouse\approved"
-    RequirementsLockFile_Api = "requirements\api.lock.txt"
+    RequirementsLockFile_Common = "requirements\common.lock.txt"
     RequirementsLockFile_Cu11 = "requirements\cu11.lock.txt"
     RequirementsLockFile_Cu12 = "requirements\cu12.lock.txt"
+}
+
+function Normalize-CudaVersionLabel {
+    param(
+        [AllowEmptyString()][string]$Version
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        return ""
+    }
+
+    $normalized = $Version.Trim()
+    $normalized = $normalized -replace '[^0-9.]', ''
+    if ([string]::IsNullOrWhiteSpace($normalized)) {
+        return ""
+    }
+
+    if ($normalized -match '^(\d+)\.(\d+)(?:\.\d+)?$') {
+        return "$($Matches[1]).$($Matches[2])"
+    }
+
+    return $normalized
 }
 
 function Get-PipelineTensorRTProfiles {
@@ -92,15 +115,19 @@ function Get-DefaultTensorRTOptionNumber {
         [Parameter(Mandatory = $true)][string[]]$TargetCudaVersion_2
     )
 
-    if ($CudaVersion -eq $TargetCudaVersion_1) {
+    $normalizedCudaVersion = Normalize-CudaVersionLabel -Version $CudaVersion
+    $normalizedTargetCudaVersion_1 = Normalize-CudaVersionLabel -Version $TargetCudaVersion_1
+    $normalizedTargetCudaVersion_2 = @($TargetCudaVersion_2 | ForEach-Object { Normalize-CudaVersionLabel -Version $_ })
+
+    if ($normalizedCudaVersion -eq $normalizedTargetCudaVersion_1) {
         return 1
     }
 
-    if ($CudaVersion -eq "12.9") {
+    if ($normalizedCudaVersion -eq "12.9") {
         return 3
     }
 
-    if ($CudaVersion -in $TargetCudaVersion_2) {
+    if ($normalizedCudaVersion -in $normalizedTargetCudaVersion_2) {
         return 2
     }
 

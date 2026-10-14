@@ -1,207 +1,379 @@
-# Requirements 운영 가이드
+# Requirements Validation Runner 운영 문서
 
-이 폴더는 `api`를 베이스 manifest로 두고, 실제 설치/검증은 `cu11` 또는 `cu12` 전체 스택 단위로 관리한다.
+이 문서는 `requirements` 폴더의 검증/동기화 워크플로를 배포용으로 설명하기 위한 문서다. 핵심 목적은 다음과 같다.
 
-## 파일 역할
+- `common`/`cu11`/`cu12` manifest를 안전하게 검증한다.
+- `validate`와 `sync lock` 사이의 차이를 명확히 구분한다.
+- 배치 파일이 어떤 입력을 받고, 어떤 PowerShell 인자를 넘기는지 문서화한다.
+- 실제 내부에서 어떤 절차가 실행되는지 설명한다.
 
-- `api.in`: 공통 API 베이스 온라인 검증용 manifest
-- `api.lock.txt`: 공통 API 베이스 오프라인 설치용 manifest
-- `cu11.in`: CUDA 11 전체 스택 온라인 검증용 manifest. 내부적으로 `api.in`을 포함한다.
-- `cu11.lock.txt`: CUDA 11 전체 스택 오프라인 설치용 manifest. 내부적으로 `api.lock.txt`를 포함한다.
-- `cu12.in`: CUDA 12 전체 스택 온라인 검증용 manifest. 내부적으로 `api.in`을 포함한다.
-- `cu12.lock.txt`: CUDA 12 전체 스택 오프라인 설치용 manifest. 내부적으로 `api.lock.txt`를 포함한다.
-- `OFFLINE_MINICONDA_ENV.md`: Miniconda 설치본과 로컬 `pkgs` 캐시를 사용해 오프라인으로 `python=3.10` env 를 만든 뒤, approved wheelhouse 로 패키지를 설치하는 운영 가이드
+---
 
-별도 `common` 계층은 두지 않는다. 이전에 `common`에 있던 단일 패키지는 각 CUDA 트랙 manifest 안에 직접 적는다.
+## 1. 파일 구성
 
-## 기본 원칙
+- `run_requirements_validation.bat`  
+  메뉴 기반 런처. 사용자가 선택한 옵션을 해석해서 PowerShell 스크립트를 호출한다.
 
-- 먼저 `.in` 파일만 수정한다.
-- 실제 검증 대상은 `cu11` 또는 `cu12` 전체 스택이다.
-- `cu11` 또는 `cu12`를 검증하면 그 안에 포함된 `api`도 같이 검증된다.
-- 검증과 `.lock.txt` 반영은 분리해서 수행한다.
-- 검증 성공 직후 자동 반영하지 않고, 결과 확인 후 별도 sync 단계에서 반영한다.
-- 오프라인 설치에는 `.lock.txt`만 사용한다.
+- `run_requirements_validation.ps1`  
+  실제 로직이 전부 들어 있는 실행기. Conda 환경 생성, dependency 설치, wheelhouse 관리, import 검증을 수행한다.
 
-## 표준 절차
+- `common.in`  
+  공통 베이스 온라인 검증 manifest.
 
-1. `api.in`, `cu11.in`, `cu12.in` 중 필요한 파일을 수정한다.
-2. 대상 트랙의 깨끗한 테스트 환경을 만든다.
-3. 온라인 환경에서 `.in` 기준으로 설치한다.
-4. API import, FastAPI 부트스트랩, PyTorch CUDA, ONNX 계열 import를 검증한다.
-5. 결과를 확인한다.
-6. 승인할 때 `api.lock.txt`와 대상 트랙의 `.lock.txt`를 sync 한다.
-7. 검증 단계에서는 `.in` 기준으로 `wheelhouse\temp`를 갱신한다.
-8. 승인된 `.lock.txt` 기준으로 `wheelhouse\approved`를 새로 만든다.
-9. 필요하면 `approved` 기준으로 오프라인 설치 검증을 수행한다.
+- `common.lock.txt`  
+  공통 베이스 오프라인/approved lock manifest.
 
-## 파일별 운영 규칙
+- `cu11.in`  
+  CUDA 11 전체 스택 검증 manifest.
 
-### `api.in` -> `api.lock.txt`
+- `cu11.lock.txt`  
+  CUDA 11 approved lock manifest.
 
-- `api`는 `cu11`, `cu12`가 항상 함께 포함하는 베이스 레이어다.
-- 최소 검증 항목은 다음과 같다.
-- 패키지 설치 성공
-- `fastapi`, `uvicorn`, `pydantic`, `requests` import 성공
-- FastAPI 앱 부트스트랩 성공
-- `api` 변경은 `cu11` 또는 `cu12` 실제 검증이 끝난 뒤 sync 한다.
+- `cu12.in`  
+  CUDA 12 전체 스택 검증 manifest.
 
-### `cu11.in` -> `cu11.lock.txt`
+- `cu12.lock.txt`  
+  CUDA 12 approved lock manifest.
 
-- `cu11`은 `api`와 CUDA 11 GPU 스택 전체를 함께 검증한다.
-- 최소 검증 항목은 다음과 같다.
-- 패키지 설치 성공
-- API import 및 부트스트랩 성공
-- `torch`, `torchvision` import 성공
-- `torch.cuda.is_available()` 성공
-- `onnxruntime-gpu`, `pycuda`, `onnx`, `onnxsim`, `onnx2torch` import 성공
-- `onnxruntime.get_available_providers()` 확인
+- `wheelhouse/`  
+  temp와 approved wheelhouse를 저장하는 디렉터리.
 
-### `cu12.in` -> `cu12.lock.txt`
+중요: `*.lock.txt`는 최종 오프라인 설치 기준 파일이다. 그래서 lock 파일에는 `--find-links`와 `--no-index`가 포함된다. 다만 approved wheelhouse를 온라인에서 재구성할 때는 스크립트가 lock 파일에서 이 오프라인 전용 지시문만 제거한 임시 파일을 사용해야 한다. 그래야 온라인에서는 artifact를 수집하고, 오프라인에서는 같은 lock 파일로만 설치할 수 있다.
 
-- `cu12`는 `api`와 CUDA 12 GPU 스택 전체를 함께 검증한다.
-- 최소 검증 항목은 다음과 같다.
-- 패키지 설치 성공
-- API import 및 부트스트랩 성공
-- `torch`, `torchvision` import 성공
-- `torch.cuda.is_available()` 성공
-- `onnxruntime-gpu`, `pycuda`, `onnx`, `onnxsim`, `onnx2torch` import 성공
-- `onnxruntime.get_available_providers()` 확인
+---
 
-## TensorRT 처리 원칙
+## 2. 실행 경로: 배치 파일이 실제로 무엇을 하는가
 
-- TensorRT는 여기서 자동 검증하지 않는다.
-- 현재 구조에서 TensorRT는 `pip install`만으로 끝나는 전제가 아니라, 별도 패키지 배치나 `pkgs` 기반 설치가 필요한 경우가 있다.
-- 따라서 이 스크립트는 `torch`와 CUDA 계열 검증까지만 기본 범위로 본다.
-- manifest 안의 `# tensorrt=...` 주석은 호환성 메모로만 취급한다.
+사용자는 보통 배치 파일을 실행하는데, 실제로는 다음 순서를 따른다.
 
-## 실제 테스트 명령 예시
+1. 메뉴 선택
+   - 1: CU11 validate only
+   - 2: CU11 sync lock only
+   - 3: CU12 validate only
+   - 4: CU12 sync lock only
+   - 5: ALL validate only
+   - 6: ALL sync lock only
+   - 7: Custom options
 
-아래 예시는 Windows PowerShell 기준이다.
+2. 옵션값 수집
+   - `TRACK` 값
+   - `RUN_MODE` 값
+   - `ENV_PREFIX`
+   - `PYTHON_VERSION`
+   - 삭제/재생성 플래그
+   - wheelhouse 관련 플래그
 
-### CUDA 11 전체 스택 테스트 예시
+3. `PS1_ARGS` 문자열 생성
+   - 예시:
+     ```bat
+     set "PS1_ARGS=-ExecutionPolicy Bypass -File "%PS1_PATH%" -Track %TRACK% -EnvPrefix %ENV_PREFIX% -PythonVersion %PYTHON_VERSION%"
+     ```
 
-```powershell
-conda create -n req-cu11 python=3.10 -y
-conda run --live-stream -n req-cu11 python -m pip install --progress-bar on --upgrade pip
-conda run --live-stream -n req-cu11 python -m pip install --progress-bar on -r requirements\cu11.in
-conda run --live-stream -n req-cu11 python -c "import fastapi, uvicorn, pydantic, requests; print(fastapi.__version__, uvicorn.__version__, pydantic.__version__, requests.__version__)"
-conda run --live-stream -n req-cu11 python -c "from fastapi import FastAPI; app = FastAPI(); print('api ok')"
-conda run --live-stream -n req-cu11 python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__); print('cuda_available=', torch.cuda.is_available()); print('cuda_version=', torch.version.cuda); assert torch.cuda.is_available()"
-conda run --live-stream -n req-cu11 python -c "import onnx, onnxsim, onnx2torch, pycuda, onnxruntime as ort; print(onnx.__version__, onnxsim.__version__, onnx2torch.__version__, ort.__version__); print(ort.get_available_providers())"
-```
+4. 추가 플래그 append
+   - `-SyncLock`
+   - `-RemoveValidationEnv`
+   - `-BuildTempWheelCache`
+   - `-ClearTempWheelCache`
+   - `-BuildApprovedWheelhouse`
+   - `-VerifyOfflineInstall`
+   - `-RemoveOfflineEnv`
 
-### CUDA 12 전체 스택 테스트 예시
+5. 최종 실행
+   ```bat
+   powershell -NoProfile -ExecutionPolicy Bypass %PS1_ARGS%
+   ```
 
-```powershell
-conda create -n req-cu12 python=3.10 -y
-conda run --live-stream -n req-cu12 python -m pip install --progress-bar on --upgrade pip
-conda run --live-stream -n req-cu12 python -m pip install --progress-bar on -r requirements\cu12.in
-conda run --live-stream -n req-cu12 python -c "import fastapi, uvicorn, pydantic, requests; print(fastapi.__version__, uvicorn.__version__, pydantic.__version__, requests.__version__)"
-conda run --live-stream -n req-cu12 python -c "from fastapi import FastAPI; app = FastAPI(); print('api ok')"
-conda run --live-stream -n req-cu12 python -c "import torch, torchvision; print(torch.__version__, torchvision.__version__); print('cuda_available=', torch.cuda.is_available()); print('cuda_version=', torch.version.cuda); assert torch.cuda.is_available()"
-conda run --live-stream -n req-cu12 python -c "import onnx, onnxsim, onnx2torch, pycuda, onnxruntime as ort; print(onnx.__version__, onnxsim.__version__, onnx2torch.__version__, ort.__version__); print(ort.get_available_providers())"
-```
+6. 종료 후 메뉴 복귀
+   - `goto MENU`
+   - 사용자는 다시 선택 가능
 
-## wheelhouse 구조
+중요한 점은, 배치 파일 자체는 실제 검증 로직을 수행하지 않는다는 것이다. 배치 파일은 “실행 명령을 조립하고 호출하는 런처” 역할만 한다.
 
-`wheelhouse`는 다음 두 단계로 관리한다.
+---
 
-- `wheelhouse\temp\api`, `wheelhouse\approved\api`: `api` 전용 staging/approved 저장소
-- `wheelhouse\temp\cu11`, `wheelhouse\temp\cu12`: 검증용 staging 캐시
-- `wheelhouse\approved\cu11`, `wheelhouse\approved\cu12`: 최종 오프라인 설치용 저장소
+## 3. 실제 검증 로직이 일어나는 장소
 
-동작 원칙은 다음과 같다.
+실제 작업은 [run_requirements_validation.ps1](run_requirements_validation.ps1) 안에서 수행된다.
 
-- `temp`는 다운로드 시간을 줄이기 위한 staging 캐시다.
-- `api`는 `api.in`/`api.lock.txt` 전용 wheelhouse다.
-- `validate only` 단계는 `.in` 기준으로 `temp\<track>`를 갱신한다.
-- `validate only` 단계에서 `api`도 별도로 `temp\api`에 갱신된다.
-- `sync lock only` 단계는 `.lock.txt`를 반영한 뒤 `approved\<track>`만 다시 만든다.
-- `sync lock only` 단계에서 `api`도 별도로 `approved\api`에 반영된다.
-- 온라인 검증용 conda 환경 삭제 여부와 `temp` 삭제 여부는 별도로 선택한다.
-- 기본값은 `온라인 검증 env 삭제 = Y`이다.
-- 오프라인 검증용 conda 환경 삭제 여부와 `approved` 삭제 여부도 별도로 선택한다.
-- 기본값은 `오프라인 검증 env 삭제 = Y`, `approved 삭제 = Y`이다.
-- 환경 삭제를 선택하지 않으면 기존 conda 환경은 자동 재사용한다.
-- `approved`는 `temp`에 모인 파일만 사용해서 lock 기준으로 정확히 다시 구성한다.
-
-## 자동 실행 스크립트 사용법
-
-이 폴더에는 다음 두 실행 파일이 있다.
-
-- `run_requirements_validation.ps1`: 실제 검증, sync, wheelhouse, 오프라인 검증을 수행하는 스크립트
-- `run_requirements_validation.bat`: 메뉴 기반 런처
-
-### 배치 런처에서 선택하는 항목
-
-- 대상 트랙 선택: `cu11`, `cu12`, `all`
-- 실행 모드 선택: `validate only`, `sync lock only`
-- 온라인 검증 env 삭제 여부
-- `validate only`에서 `.in` 기반 `temp` 캐시 갱신 여부
-- `temp` 캐시 삭제 여부
-- `sync lock only`에서 `approved` 재구성 여부
-- `approved` 저장소 삭제 여부
-- `approved` 기준 오프라인 설치 검증 여부
-- 오프라인 검증 env 삭제 여부
-
-### 메뉴 동작 방식
-
-- `validate only`: 대상 `.in`으로 설치와 검증만 수행한다.
-- `validate only`에서 wheelhouse를 켜면 `api`와 대상 트랙의 `.in` 기준으로 각각 `temp`를 갱신한다. `approved`는 건드리지 않는다.
-- `sync lock only`: 설치와 검증 없이 `api.lock.txt`와 대상 트랙 `.lock.txt`를 반영한다.
-- `sync lock only`에서 wheelhouse를 켜면 `api`와 대상 트랙의 `.lock.txt` 기준으로 각각 `approved`를 다시 만든다. `temp`는 건드리지 않는다.
-- `cu11` 또는 `cu12` 검증 시 API 검증은 항상 같이 수행된다.
-- CUDA 검증은 항상 수행된다.
-- TensorRT 검증은 수행하지 않는다.
-- 온라인 검증 env 삭제와 `temp` 삭제는 서로 독립이다.
-- `Verify offline installation`을 선택하면 `approved\api`와 대상 트랙 `approved`를 함께 사용해서 별도 오프라인 환경에 다시 설치 후 같은 검증을 반복한다.
-- 내부적으로 `conda run --live-stream`과 `pip --progress-bar on`을 사용하므로, 다운로드와 설치 진행이 콘솔에 실시간으로 표시된다.
-- Y/N 질문은 자동으로 선택되지 않는다. 엔터만 누르면 표시된 기본값이 적용된다.
-
-### PowerShell 직접 실행 예시
+스크립트의 시작 부분은 다음과 같은 `param` 블록으로 구성된다.
 
 ```powershell
- powershell -ExecutionPolicy Bypass -File .\requirements\run_requirements_validation.ps1 -Track cu11 -RemoveValidationEnv
+[CmdletBinding()]
+param(
+    [ValidateSet("cu11", "cu12", "all")]
+    [string[]]$Track = @("cu11"),
+
+    [string]$EnvPrefix = "req",
+    [string]$PythonVersion = "3.10",
+
+    [switch]$SyncLock,
+    [switch]$BuildTempWheelCache,
+    [switch]$BuildApprovedWheelhouse,
+    [switch]$VerifyOfflineInstall,
+    [string]$WheelOutputRoot = "",
+    [string]$LogRoot = "",
+    [switch]$RemoveValidationEnv,
+    [switch]$ClearTempWheelCache,
+    [switch]$ClearApprovedWheelhouse,
+    [switch]$RemoveOfflineEnv,
+    [switch]$SkipCreateEnv,
+    [switch]$SkipInstall,
+    [switch]$SkipValidation
+)
 ```
+
+이 값들은 다음 단계로 이어진다.
+
+- `Track`: 검증 대상 트랙
+- `EnvPrefix`: 환경 이름 접두어, 예: `req-cu11`
+- `PythonVersion`: 생성할 Conda 환경의 Python 버전, 기본 `3.10`
+- `SyncLock`: lock 기반 sync 모드 활성화
+- `BuildTempWheelCache`: `.in` 기반 temp wheelhouse 생성
+- `BuildApprovedWheelhouse`: approved wheelhouse 생성
+- `VerifyOfflineInstall`: approved 기반 오프라인 설치 검증
+- `RemoveValidationEnv`: 기존 validation 환경 삭제 후 재생성
+- `ClearTempWheelCache`: temp 캐시 삭제
+- `ClearApprovedWheelhouse`: approved wheelhouse 삭제
+- `RemoveOfflineEnv`: 오프라인 검증 환경 삭제
+
+---
+
+## 4. 1번과 2번의 실제 차이
+
+### 1번: CU11 validate only
+
+배치 파일에서 `SET_PRESET cu11 validate`가 실행되면 다음 값이 설정된다.
+
+- `TRACK = cu11`
+- `RUN_MODE = validate`
+- `SYNC_LOCK = no`
+- `BUILD_TEMP_CACHE = yes`
+- `REMOVE_VALIDATION_ENV = yes` (기본 확인 질문)
+
+최종 인자 구성은 대략 다음과 같다.
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Setup_Pipeline\requirements\run_requirements_validation.ps1" -Track cu11 -EnvPrefix req -PythonVersion 3.10 -RemoveValidationEnv -BuildTempWheelCache -ClearTempWheelCache
+```
+
+이 모드는 실제로 다음을 한다.
+
+- `req-cu11` 환경 생성 또는 재생성
+- `common.in` + `cu11.in` 설치
+- import 검증
+- CUDA 관련 검증
+- 로그 기록
+- wheelhouse temp 캐시 갱신
+
+### 2번: CU11 sync lock only
+
+배치 파일에서 `SET_PRESET cu11 sync`가 실행되면 다음 값이 설정된다.
+
+- `TRACK = cu11`
+- `RUN_MODE = sync`
+- `SYNC_LOCK = yes`
+- `BUILD_APPROVED_WHEELHOUSE = yes`
+- `VERIFY_OFFLINE = yes`
+- `REMOVE_OFFLINE_ENV = yes`
+
+최종 인자 구성은 대략 다음과 같다.
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Setup_Pipeline\requirements\run_requirements_validation.ps1" -Track cu11 -EnvPrefix req -PythonVersion 3.10 -SyncLock -RemoveValidationEnv -BuildApprovedWheelhouse -VerifyOfflineInstall -RemoveOfflineEnv
+```
+
+이 모드는 실제로 다음을 한다.
+
+- `common.in`과 `cu11.in`을 기준으로 온라인에서 approved wheelhouse를 먼저 재생성
+- approved wheelhouse 안에 실제로 모인 artifact 목록을 기준으로 `common.lock.txt`와 `cu11.lock.txt`를 생성
+- offline 검증용 env 생성
+- 방금 생성한 lock 파일과 approved artifact만 사용해서 오프라인 설치 검증 수행
+
+이 과정에서 sync 모드는 온라인 env에 패키지를 설치해서 검증하지 않는다. 온라인 단계의 목적은 artifact 수집뿐이고, 실제 설치 검증은 lock 기반 오프라인 단계에서만 수행한다.
+
+즉 sync 모드의 기준은 `pip freeze`가 아니라 approved wheelhouse의 실제 artifact 집합이다. 온라인 단계는 `.in`이 담당하고, 오프라인 단계는 그 결과물로 생성된 `*.lock.txt`가 담당한다.
+
+즉, 1번은 “검증 중심”, 2번은 “lock 반영 + approved 재생성 중심”이다.
+
+---
+
+## 5. 내부 동작 상세
+
+PowerShell 스크립트는 다음 절차를 따른다.
+
+### 5.1. 로그 초기화
+
+- 로그 파일 이름 생성
+- `requirements/logs`에 transcript 및 sidecar 로그 저장
+- 실행 경로와 선택값 기록
+
+### 5.2. Conda 환경 존재 여부 확인
+
+스크립트는 `Test-CondaEnvironmentExists`를 사용해 이름이 이미 있는지 판단한다.
+
+핵심 아이디어는 전체 `conda env list --json`을 파싱하지 않고, 특정 환경 이름을 직접 확인하는 것이다.
 
 ```powershell
- powershell -ExecutionPolicy Bypass -File .\requirements\run_requirements_validation.ps1 -Track cu12 -SyncLock -BuildApprovedWheelhouse -ClearApprovedWheelhouse -VerifyOfflineInstall -RemoveOfflineEnv -SkipCreateEnv -SkipInstall -SkipValidation
+$probeArguments = @(
+    "run",
+    "-n",
+    $EnvironmentName,
+    "python",
+    "-c",
+    "import sys; print(sys.executable)"
+)
 ```
+
+이 방식은 목적 환경만 확인하고, 불필요한 환경 목록 파싱을 피한다.
+
+### 5.3. Conda 호출 래퍼
+
+스크립트는 모든 `conda` 명령을 배열 기반으로 호출한다.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\requirements\run_requirements_validation.ps1 -Track all -SyncLock -SkipCreateEnv -SkipInstall -SkipValidation
+& conda @Arguments
 ```
 
-## 가상환경 동작 방식
+이 방식이 중요한 이유는 다음과 같다.
 
-- 실험용 가상환경은 `req-cu11`, `req-cu12`처럼 생성된다.
-- 오프라인 검증용 환경은 `req-cu11-offline`, `req-cu12-offline`처럼 별도로 만든다.
-- 기본적으로 환경은 자동 삭제하지 않는다.
-- `-RemoveValidationEnv`를 주면 온라인 검증용 기존 환경을 지우고 다시 만든다.
-- `-RemoveOfflineEnv`를 주면 오프라인 검증용 기존 환경을 지우고 다시 만든다.
-- `sync lock only`에서는 환경을 만들지 않는다.
+- `-n`, `--live-stream` 등의 옵션이 문자열 결합으로 깨지지 않는다.
+- PowerShell의 파라미터 바인딩 오작동을 피한다.
+- 오래된 세션/옛 함수가 남아 있을 때 생기는 문제를 줄인다.
 
-## 오프라인 설치 검증 방식
+### 5.4. 환경 생성 및 삭제
 
-오프라인 설치 검증은 다음 순서로 진행한다.
+- `New-CondaEnvironment`:
+  ```powershell
+  Invoke-Conda -Arguments @("create", "-n", $EnvironmentName, ("python={0}" -f $RequestedPythonVersion), "-y")
+  ```
 
-1. `<env>-offline` 환경 생성
-2. `wheelhouse\approved\api`와 `wheelhouse\approved\<track>`를 함께 사용해서 `--no-index --find-links ... -r <track>.lock.txt` 설치
-3. API 검증과 GPU 검증 재실행
+- `Remove-CondaEnvironment`:
+  ```powershell
+  Invoke-Conda -Arguments @("env", "remove", "-n", $EnvironmentName, "-y")
+  ```
 
-즉, `api` approved와 트랙 approved를 함께 사용해 실제 오프라인 재설치가 가능한지 확인하는 절차다.
+### 5.5. 설치 과정
 
-## 로그 저장 규칙
+스크립트는 일반적으로 다음 흐름으로 진행한다.
 
-- `run_requirements_validation.ps1`는 `requirements\logs\` 아래에 transcript 로그를 남긴다.
-- `run_requirements_validation.bat`는 별도의 launcher 로그를 남긴다.
-- launcher 로그에는 선택 옵션과 최종 명령이 기록된다.
-- transcript 로그에는 실제 설치, 다운로드, 검증 출력이 기록된다.
+1. Conda env 준비
+2. `pip install --upgrade pip`
+3. manifest install
+4. 검증 스크립트 실행
+5. 필요하면 wheelhouse 생성
+6. 결과 로그 저장
 
-## 운영 판단 기준
+### 5.6. 검증 단계
 
-- GPU 트랙은 import 성공만으로 끝내지 않는다.
-- `torch.cuda.is_available()`까지 통과해야 승인 대상으로 본다.
-- `.in`이 바뀌었는데 sync 하지 않았다면 대응 `.lock.txt`는 stale 상태다.
-- 릴리스 전에는 `api.lock.txt`와 대상 CUDA lock이 최신 검증 결과와 맞는지 확인한다.
+검증은 보통 아래 항목을 대상으로 한다.
+
+- 공통 import
+- FastAPI 앱 부트스트랩
+- torch import
+- CUDA availability 확인
+- ONNX, ONNX Runtime, pycuda 계열 import
+- provider 목록 확인
+
+결과값은 로그 파일과 콘솔에 같이 출력된다.
+
+---
+
+## 6. wheelhouse 관리 방식
+
+스크립트는 `temp`와 `approved`를 분리해서 관리한다.
+
+- `temp`: 검증용 staging 캐시
+- `approved`: 릴리즈/오프라인 배포용 최종 저장소
+
+예시 구조:
+
+```text
+requirements/
+  wheelhouse/
+    temp/
+      common/
+      cu11/
+      cu12/
+    approved/
+      common/
+      cu11/
+      cu12/
+```
+
+### validate only
+
+- `.in` 기준으로 temp wheelhouse를 갱신한다.
+- approved는 건드리지 않는다.
+
+### sync lock only
+
+- `.lock.txt` 기준으로 approved wheelhouse를 다시 만든다.
+- temp는 건드리지 않는다.
+
+---
+
+## 7. 로그 규칙
+
+실행 로그는 두 종류로 나뉜다.
+
+1. `run_requirements_validation.ps1` transcript log  
+   실제 설치, 다운로드, 검증 출력이 기록된다.
+
+2. `run_requirements_validation.bat` launcher log  
+   메뉴 선택값, 플래그, 최종 실행 명령이 기록된다.
+
+로그 위치는 보통 다음 경로이다.
+
+```text
+requirements/logs/
+```
+
+---
+
+## 8. 배포용 팁: 안정적인 실행권장 방법
+
+운영 환경에서 안정적으로 쓰기 위해서는 PowerShell 프로필 로딩을 막고 새 프로세스에서 실행하는 것이 좋다.
+
+권장 실행 방식:
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Setup_Pipeline\requirements\run_requirements_validation.ps1" -Track cu11 -EnvPrefix req -PythonVersion 3.10 -RemoveValidationEnv
+```
+
+이렇게 하면 오래된 함수 정의, 사용자 프로필 alias, Conda init 관련 설정이 섞이지 않아 에러를 줄인다.
+
+---
+
+## 9. 빠른 운영 예시
+
+### CUDA 11 즉시 검증
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\requirements\run_requirements_validation.ps1 -Track cu11 -EnvPrefix req -PythonVersion 3.10 -RemoveValidationEnv -BuildTempWheelCache
+```
+
+### CUDA 11 lock sync + approved wheelhouse 생성
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\requirements\run_requirements_validation.ps1 -Track cu11 -EnvPrefix req -PythonVersion 3.10 -SyncLock -BuildApprovedWheelhouse -VerifyOfflineInstall -RemoveOfflineEnv
+```
+
+### CUDA 12 validate only
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\requirements\run_requirements_validation.ps1 -Track cu12 -EnvPrefix req -PythonVersion 3.10 -RemoveValidationEnv -BuildTempWheelCache
+```
+
+---
+
+## 10. 운영 원칙 요약
+
+- `.in`은 검증용 manifest다.
+- `.lock.txt`는 approved lock manifest다.
+- `validate`는 `.in` 기준 검증 중심이다.
+- `sync lock`은 `.lock.txt` 반영과 approved wheelhouse 생성 중심이다.
+- 실제 실행은 배치 파일이 아니라 PowerShell 스크립트에서 수행된다.
+- `-NoProfile` 실행을 권장한다.
+- 로그와 wheelhouse 상태를 항상 확인한 뒤 next step을 결정한다.
+
+이 문서는 배포 환경에서 운영자가 “무엇을 누르고, 어떤 단계가 실행되며, 어떤 결과가 남는지” 이해할 수 있도록 정리한 운영 문서다.

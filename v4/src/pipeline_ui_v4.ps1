@@ -405,7 +405,10 @@ function New-SetupPipelineUi {
         $btnInstall.Height = 32
         $btnInstall.Left = 598
         $btnInstall.Top = 488
-        $btnInstall.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+        $btnInstall.Add_Click({
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+            $form.Close()
+        })
         $form.Controls.Add($btnInstall)
 
         $btnSkip = New-Object System.Windows.Forms.Button
@@ -414,7 +417,10 @@ function New-SetupPipelineUi {
         $btnSkip.Height = 32
         $btnSkip.Left = 714
         $btnSkip.Top = 488
-        $btnSkip.DialogResult = [System.Windows.Forms.DialogResult]::No
+        $btnSkip.Add_Click({
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::No
+            $form.Close()
+        })
         $form.Controls.Add($btnSkip)
 
         $btnAbort = New-Object System.Windows.Forms.Button
@@ -423,8 +429,18 @@ function New-SetupPipelineUi {
         $btnAbort.Height = 32
         $btnAbort.Left = 830
         $btnAbort.Top = 488
-        $btnAbort.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+        $btnAbort.Add_Click({
+            $form.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            $form.Close()
+        })
         $form.Controls.Add($btnAbort)
+
+        $form.Add_FormClosing({
+            param($sender, $e)
+            if ($sender.DialogResult -eq [System.Windows.Forms.DialogResult]::None) {
+                $sender.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+            }
+        })
 
         $form.AcceptButton = $btnInstall
         $form.CancelButton = $btnAbort

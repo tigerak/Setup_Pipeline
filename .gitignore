@@ -6,5 +6,7 @@
 
 # 
 /_tmp_pkg_probe/
-/.venv/
-/.vscode/
+/.*/
+
+# 타인 작성
+/eval_test/

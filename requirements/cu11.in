@@ -1,16 +1,15 @@
--r api.in
+-r common.in
 --extra-index-url https://download.pytorch.org/whl/cu118
-PyQt5==5.15.11
-numpy==1.26.4
-pillow==10.4.0
+# CUDA 11.8 / TensorRT 8.5.3.1
+pillow==10.1.0
 matplotlib==3.9.2
-pycuda==2024.1
+pycuda==2023.1
 
 # tensorrt==8.5.3.1
-torch==2.7.1+cu118
-torchvision==0.22.1+cu118
+torch==2.5.1+cu118
+torchvision==0.20.1+cu118
 
-onnxruntime-gpu==1.23.0
-onnx==1.23.0
-onnxsim==0.7.3
+onnx==1.17.0
+onnxruntime-gpu==1.20.2
+onnxsim==0.4.36
 onnx2torch==1.5.15

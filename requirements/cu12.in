@@ -1,16 +1,33 @@
--r api.in
---extra-index-url https://download.pytorch.org/whl/cu128
-PyQt5==5.15.11
-numpy==1.26.4
-pillow==12.3.0
-matplotlib==3.10.9
-pycuda==2026.1
+-r common.in
 
-# tensorrt==10.9.0.34
-torch==2.11.0+cu128
-torchvision==0.26.0+cu128
+# CUDA 12.8 / TensorRT 10.9.0.34
+# === 모델이 Numpy 1. 버전만 지원함에 따라 버전 정렬 낮춤 ===
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.6.0+cu126
+torchvision==0.21.0+cu126
 
-onnxruntime-gpu==1.23.2
-onnx==1.23.0
-onnxsim==0.7.3
+pillow==10.1.0
+matplotlib==3.8.4
+pycuda==2023.1
+
+onnx==1.17.0
+onnxruntime-gpu==1.21.0
+onnxsim==0.4.36
 onnx2torch==1.5.15
+
+# === Numpy 2. 버전으로 설계할 경우를 위한 버전 정렬 ===
+# numpy==2.2.6
+
+# pillow==12.3.0
+# matplotlib==3.10.9
+# pycuda==2026.1
+
+# # tensorrt==10.9.0.34
+# --extra-index-url https://download.pytorch.org/whl/cu128
+# torch==2.11.0+cu128
+# torchvision==0.26.0+cu128
+
+# onnxruntime-gpu==1.23.2
+# onnx==1.23.0
+# onnxsim==0.7.3
+# onnx2torch==1.5.15
